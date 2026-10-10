@@ -5,3 +5,4 @@ AppIcon.icns
 /inject.js
 /watcher.js
 .DS_Store
+/test/out/

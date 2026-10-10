@@ -82,7 +82,7 @@
     return usable;
   }
 
-  // Profildeki gerçek takipçi/takip sayıları (istatistik kartları için, tek ucuz istek).
+  // Profildeki gerçek takipçi/takip sayıları (istatistik kartları ve grafik için, tek ucuz istek).
   async function fetchProfileCounts() {
     try {
       const uid = getCookie("ds_user_id");
@@ -91,7 +91,10 @@
       const d = await res.json();
       const u = d.user || (d.data && d.data.user);
       if (u) {
-        if (typeof u.follower_count === "number") S.followerCount = u.follower_count;
+        if (typeof u.follower_count === "number") {
+          S.followerCount = u.follower_count; // igd_follower_count yalnızca izleyicinindir (bildirim tabanı)
+          if (lsGet("igd_series_on", "1") !== "0") seriesAdd(u.follower_count).catch(() => {});
+        }
         if (typeof u.following_count === "number") S.followingCount = u.following_count;
         render();
       }
@@ -99,7 +102,6 @@
   }
 
   // TAKİP LİSTESİ taraması: takip ettiklerini çeker, geri-takip durumunu show_many ile öğrenir.
-  // 30.000 takipçi taranmaz. "Hayranlar" için ayrıca fetchAllFollowers() gerekir.
   async function runScan() {
     if (guardBusy()) return;
     if (!isLoggedIn()) { toast("Önce Instagram'a giriş yap.", true); return; }
@@ -131,15 +133,15 @@
       S.scanned = true;
 
       if (S.followersFull && S.followers.length) {
-        // Zaten tam takipçi listen var → geri-takip kesin biliniyor, ekstra analiz gerekmez.
+        // TAM takipçi listen var → geri-takip kesin biliniyor, ekstra analiz gerekmez.
+        // (Eksik/kısaltılmış liste burada KULLANILMAZ: seni takip edenleri yanlışlıkla "geri takip etmiyor" sayardı.)
         S.followerIds = new Set(S.followers.map((u) => String(u.pk)));
-        setStatus("Mevcut takipçi listen kullanıldı (yeniden tarama yok).");
+        setStatus("Mevcut tam takipçi listen kullanıldı (yeniden tarama yok).");
       } else {
         S.followerIds = new Set();
         S.detecting = true;   // analiz bitene kadar liste "analiz ediliyor" gösterir
         render();
 
-        // Geri-takip durumlarını topluca öğren. Sonuç güvenilir olana kadar liste GÖSTERİLMEZ.
         setStatus("Kim geri takip ediyor analiz ediliyor...");
         const ids = following.map((u) => String(u.pk));
         let gotData = false;
@@ -170,9 +172,16 @@
           setStatus("Son çare: takipçi listesi taranıyor (uzun sürebilir)...");
           const followers = await fetchList("followers", (n, m) => setStatus(`Takipçiler: ${n} kişi ${m}`));
           if (!S.stopFlag) {
-            S.followers = followers; S.followersFull = true;
-            S.followerIds = new Set(followers.map((u) => String(u.pk)));
+            S.followers = followers;
+            S.followersFull = isCompleteList(followers.length, S.followerCount);
+            S.followersTrunc = !S.followersFull;
             S.followersScanTime = Date.now();
+            if (!S.followersFull) {
+              // Eksik listeyle geri-takip hesaplanırsa seni takip edenler "geri takip etmiyor" görünür → güvenli değil
+              Object.assign(S, prev);
+              throw new Error("Instagram geri takip bilgisini vermedi ve takipçi listesini de eksik verdi; geri takip etmeyenler güvenilir hesaplanamadı. Önceki sonuçlar korunuyor — biraz sonra yeniden dene.");
+            }
+            S.followerIds = new Set(followers.map((u) => String(u.pk)));
           }
         }
         S.detecting = false;
@@ -181,8 +190,9 @@
         Object.assign(S, prev);
         summary = "Tarama durduruldu — önceki sonuçlar korunuyor.";
       } else {
+        S.needRescan = false;
         S.followingScanTime = Date.now();
-        S.cacheTime = Date.now(); saveCache();
+        S.cacheTime = Date.now(); await saveCache();
         summary = `Takip listesi tarandı ✓ · ${fmtN(S.following.length)} kişi`;
       }
     } catch (e) {
@@ -195,70 +205,105 @@
     }
   }
 
-  // Tüm takipçileri çek — AKIŞLI (taradıkça liste canlı güncellenir).
+  // Tüm takipçileri çek — AKIŞLI (taradıkça liste canlı güncellenir) ve KALDIĞI YERDEN DEVAM EDEBİLİR.
+  // Liste profildeki sayının belirgin altında biterse "eksik" sayılır: anlık görüntü ve "kim ayrıldı"
+  // karşılaştırması yapılmaz, geri-takip kümesi küçültülmez.
+  const RESUME_MAX_AGE = 6 * 3600000;
   async function fetchAllFollowers() {
     if (guardBusy()) return;
     if (!isLoggedIn()) { toast("Önce Instagram'a giriş yap.", true); return; }
+    let resume = null;
+    const r = S.resume;
+    if (r && r.maxId && Date.now() - r.t < RESUME_MAX_AGE && S.followers.length === r.n && !S.followersFull) {
+      const choice = await openDialog({
+        title: "Yarım kalan takipçi taraması",
+        body: `<p>Önceki tarama <b>${fmtN(r.n)}${r.expected ? " / " + fmtN(r.expected) : ""}</b> takipçide kalmıştı (${esc(ageStr(r.t))}).</p>
+          <p class="igd-note">Kaldığın yerden devam etmek istekleri ve süreyi azaltır. Instagram'ın kaldığın yeri hatırlama süresi dolmuşsa tarama otomatik olarak baştan başlar.</p>`,
+        buttons: [{ label: "Vazgeç", value: null }, { label: "Baştan tara", value: "fresh" }, { label: "Kaldığı yerden devam et", kind: "primary", value: "resume" }],
+      });
+      if (!choice) return;
+      if (choice === "resume") resume = r;
+    }
+    if (guardBusy()) return;
     S.running = true; S.stopFlag = false;
-    S.followers = []; S.followersFull = false; S.followersLoading = true; S._botVerifyTried = false;
+    if (!resume) S.followers = [];
+    S.followersFull = false; S.followersTrunc = false; S.followersLoading = true; S._botVerifyTried = false;
     startJob({ title: "Takipçiler taranıyor", total: S.followerCount || 0, src: "followers" });
     render();
-    let summary = "";
+    await fetchProfileCounts(); // beklenen sayı tamlık kontrolü için güncel olsun
+    const expected = S.followerCount || 0;
+    if (S.job && expected) S.job.total = expected;
+    let summary = "", maxId = resume ? resume.maxId : "", page = 0, natural = false, badCursor = false;
+    const seen = new Set(S.followers.map((u) => String(u.pk)));
+    const saveResume = async () => {
+      S.resume = { maxId, n: S.followers.length, t: Date.now(), expected };
+      await DB.set(K.resumeFollowers, S.resume).catch(() => {});
+      await saveCache();
+    };
     try {
       const uid = getCookie("ds_user_id");
-      let maxId = "", page = 0;
       while (true) {
         if (S.stopFlag) break;
-        if (page > 500) break;
-        const url = `https://www.instagram.com/api/v1/friendships/${uid}/followers/?count=100` + (maxId ? `&max_id=${encodeURIComponent(maxId)}` : "");
-        let res;
-        try { res = await api(url); } catch (e) { await sleep(3000); continue; }
-        if (res.status === 401 || res.status === 403) throw new Error("İstek reddedildi (oturum veya geçici limit).");
-        if (res.status === 429) { setStatus(`Limit — 30 sn bekleniyor... (${fmtN(S.followers.length)} takipçi)`); await sleep(30000); continue; }
-        if (!res.ok) { await sleep(2000); continue; }
-        let d; try { d = await res.json(); } catch (e) { await sleep(2000); continue; }
-
-        (d.users || []).forEach((u) => S.followers.push(u));
+        if (page > 600) break;
+        let pg;
+        try { pg = await fetchFollowersPage(uid, maxId, (m) => setStatus(`${m} (${fmtN(S.followers.length)} takipçi)`)); }
+        catch (e) {
+          if (e.message === "CURSOR" && resume && page === 0) {
+            jobLog("Kaldığın yer Instagram'da artık geçerli değil; baştan taranıyor.", "warn");
+            S.followers = []; seen.clear(); maxId = ""; resume = null; continue;
+          }
+          if (e.message === "CURSOR") { badCursor = true; throw new Error("Instagram listenin devamını vermedi (HTTP 400)."); }
+          throw e;
+        }
+        pg.users.forEach((u) => { const k = String(u.pk); if (!seen.has(k)) { seen.add(k); S.followers.push(u); } });
         page++;
-        setStatus(`${fmtN(S.followers.length)}${S.followerCount ? " / " + fmtN(S.followerCount) : ""} takipçi — taradıkça listeleniyor`);
-        if (S.followerCount) jobProgress(Math.min(S.followers.length, S.followerCount), S.followerCount);
+        setStatus(`${fmtN(S.followers.length)}${expected ? " / " + fmtN(expected) : ""} takipçi — taradıkça listeleniyor`);
+        if (expected) jobProgress(Math.min(S.followers.length, expected), expected);
         if (page % 2 === 0) render(); // canlı göster (sanal liste sayesinde ucuz)
-
-        maxId = d.next_max_id;
-        if (!maxId) break;
+        maxId = pg.nextMaxId;
+        if (!maxId) { natural = true; break; }
+        if (page % 20 === 0) await saveResume(); // uygulama kapanırsa kaldığı yerden devam
         await sleep(rand(600, 1200));
         if (page % 6 === 0) { setStatus(`Güvenlik molası ~7 sn... (${fmtN(S.followers.length)} takipçi)`); await sleep(7000); }
       }
 
-      // Tam listede geri-takip kümesi kesinleşir. Durdurulduysa küme yalnızca genişletilir:
-      // eksik liste, seni takip edenleri "geri takip etmeyenler"e düşürmesin.
-      if (!S.stopFlag) S.followerIds = new Set(S.followers.map((u) => String(u.pk)));
-      else S.followers.forEach((u) => S.followerIds.add(String(u.pk)));
       S.followersLoading = false;
+      const n = S.followers.length;
+      const complete = natural && isCompleteList(n, expected);
+      // Geri-takip kümesi yalnızca TAM listede yeniden kurulur; aksi halde yalnızca genişletilir.
+      if (complete) S.followerIds = new Set(S.followers.map((u) => String(u.pk)));
+      else S.followers.forEach((u) => S.followerIds.add(String(u.pk)));
+      S.followersScanTime = Date.now();
 
-      if (!S.stopFlag) {
-        S.followersFull = true;
-        S.followersScanTime = Date.now();
+      if (complete) {
+        S.followersFull = true; S.resume = null; DB.del(K.resumeFollowers).catch(() => {});
         const curMap = {};
         S.followers.forEach((u) => { curMap[String(u.pk)] = u.username; });
-        const prevSnap = loadFullSnap();
-        saveFullSnap(curMap);
-        S.cacheTime = Date.now(); saveCache();
-        if (prevSnap) {
+        const prevSnap = await DB.get(K.snapFollowers);
+        await DB.set(K.snapFollowers, { t: Date.now(), count: n, expected, complete: true, map: curMap });
+        if (prevSnap && prevSnap.complete && prevSnap.map) {
           const gone = [];
-          for (const pk in prevSnap) if (!(pk in curMap)) gone.push(prevSnap[pk]);
+          for (const pk in prevSnap.map) if (!(pk in curMap)) gone.push(prevSnap.map[pk]);
           if (gone.length) {
             const l = gone.slice(0, 12).map((u) => "@" + u).join(", ") + (gone.length > 12 ? ` +${gone.length - 12}` : "");
-            summary = `Takipçiler tarandı ✓ · son taramadan bu yana ${gone.length} kişi ayrılmış`;
+            summary = `Takipçiler tarandı ✓ · son tam taramadan bu yana ${gone.length} kişi ayrılmış`;
             jobLog(`Ayrılanlar: ${gone.map((u) => "@" + u).join(", ")}`, "warn");
             toast(`${gone.length} kişi seni takibi bırakmış:\n${l}`);
-          } else summary = "Takipçiler tarandı ✓ · son taramadan bu yana ayrılan yok 🎉";
-        } else summary = `Takipçiler tarandı ✓ · ${fmtN(S.followers.length)} takipçi`;
+          } else summary = "Takipçiler tarandı ✓ · son tam taramadan bu yana ayrılan yok 🎉";
+        } else summary = `Takipçiler tarandı ✓ · ${fmtN(n)} takipçi`;
+      } else if (natural) {
+        S.followersTrunc = true; S.resume = null; DB.del(K.resumeFollowers).catch(() => {});
+        summary = `Instagram listenin yalnızca ${fmtN(n)} / ${fmtN(expected)} kısmını verdi`;
+        jobLog(`Instagram takipçi listesini ${fmtN(n)} hesapta bitirdi (profilde ${fmtN(expected)}). Liste eksik olduğu için “kim ayrıldı” karşılaştırması ve rapor bu taramayla yapılmadı; Hayranlar/Şüpheli listeleri eksik olabilir.`, "warn");
       } else {
-        summary = `Durduruldu — ${fmtN(S.followers.length)} takipçi alındı (kısmi).`;
+        await saveResume();
+        summary = `Durduruldu — ${fmtN(n)} takipçi alındı. Kaynak kartından kaldığın yerden devam edebilirsin.`;
       }
+      S.cacheTime = Date.now(); await saveCache();
     } catch (e) {
       S.followersLoading = false;
+      if (S.followers.length && maxId && !badCursor) await saveResume();
+      else { S.resume = null; DB.del(K.resumeFollowers).catch(() => {}); await saveCache(); }
       summary = "Hata: " + e.message; toast(e.message, true);
     } finally {
       S.running = false; S.stopFlag = false;
@@ -268,8 +313,8 @@
   }
 
   // ================================================================ VERİ: DM kutusu
-  // DM kutusunu sayfalayıp hem etkileşim haritasını (pk->ms) hem de sohbet listesini
-  // (thread_id ile — silme için gerekli) çeker. Yalnızca liste ve tarih; mesaj içeriği okunmaz.
+  // DM kutusunu sayfalayıp hem etkileşim haritasını (pk->ms) hem de sohbet listesini çeker.
+  // Yalnızca liste ve tarih; mesaj içeriği okunmaz.
   async function fetchDMThreads(onProgress) {
     const map = {}, threads = [];
     let cursor = "", pages = 0, guard = 0;
@@ -314,7 +359,7 @@
       if (S.stopFlag) { summary = "Durduruldu."; return; }
       S.dmMap = map; S.dmThreads = threads; S.dmScanned = true;
       S.dmScanTime = Date.now();
-      saveCache();
+      await saveCache();
       summary = `DM kutusu tarandı ✓ · ${fmtN(threads.length)} sohbet · ${fmtN(Object.keys(map).length)} kişiyle DM geçmişi`;
     } catch (e) {
       summary = "Hata: " + e.message; toast(e.message, true);
@@ -337,18 +382,65 @@
     return `${Math.floor(mo / 12)}+ yıl önce DM`;
   }
 
+  // ================================================================ VERİ: hayalet takipçiler (son gönderileri beğenmeyenler)
+  // Yalnızca okuma yapar: kendi son N gönderinin beğenenlerini toplar. Popüler gönderilerde
+  // Instagram beğenen listesini kısaltabildiği için sonuç yaklaşıktır; kapsama oranı gösterilir.
+  const ghostPosts = () => Math.max(3, Math.min(30, parseInt(lsGet("igd_ghost_posts", "12"), 10) || 12));
+  async function scanLikes() {
+    if (guardBusy()) return;
+    if (!isLoggedIn()) { toast("Önce Instagram'a giriş yap.", true); return; }
+    const uid = getCookie("ds_user_id");
+    const want = ghostPosts();
+    S.running = true; S.stopFlag = false;
+    startJob({ title: "Son gönderilerini beğenenler alınıyor", total: want, src: "likes" });
+    let summary = "";
+    try {
+      const res = await api(`https://www.instagram.com/api/v1/feed/user/${uid}/?count=${want}`);
+      if (!res.ok) throw new Error("Gönderilerin okunamadı (HTTP " + res.status + ")");
+      const d = await res.json();
+      const posts = (d.items || []).slice(0, want);
+      if (!posts.length) throw new Error("Hiç gönderin bulunamadı.");
+      const likers = new Set();
+      let total = 0, got = 0, done = 0;
+      for (const p of posts) {
+        if (S.stopFlag) break;
+        const mid = String(p.id || "").includes("_") ? p.id : `${p.pk}_${uid}`;
+        try {
+          const lr = await api(`https://www.instagram.com/api/v1/media/${encodeURIComponent(mid)}/likers/`);
+          if (lr.status === 429) { setStatus("hız limiti — 30 sn bekleniyor"); await sleep(30000); }
+          else if (lr.ok) {
+            const ld = await lr.json();
+            (ld.users || []).forEach((u) => likers.add(String(u.pk)));
+            got += (ld.users || []).length;
+          } else jobLog(`Bir gönderinin beğenenleri okunamadı (HTTP ${lr.status})`, "warn");
+        } catch (e) { jobLog("Bir gönderinin beğenenleri okunamadı", "warn"); }
+        total += typeof p.like_count === "number" ? p.like_count : 0;
+        done++;
+        jobProgress(done, posts.length);
+        setStatus(`${done}/${posts.length} gönderi · ${fmtN(likers.size)} farklı beğenen`);
+        await sleep(rand(1500, 3000));
+      }
+      if (S.stopFlag) { summary = "Durduruldu — beğeniler kaydedilmedi."; return; }
+      S.likes = { t: Date.now(), posts: done, likers, totalLikes: total, gotLikes: got };
+      await DB.set(K.likes, { t: S.likes.t, posts: done, likers: [...likers], totalLikes: total, gotLikes: got });
+      const cov = total ? Math.round(Math.min(1, got / total) * 100) : 100;
+      summary = `Beğeniler alındı ✓ · ${done} gönderi · ${fmtN(likers.size)} farklı beğenen · kapsama %${cov}`;
+    } catch (e) {
+      summary = "Hata: " + e.message; toast(e.message, true);
+    } finally { S.running = false; S.stopFlag = false; jobFinish(summary); render(); }
+  }
+
   // ================================================================ listeler, süzme, sıralama
   function catList(cat) {
     if (cat === "non")    return S.following.filter((u) => !S.followerIds.has(String(u.pk)));
     if (cat === "fans")   return S.followers.filter((u) => !S.followingIds.has(String(u.pk)));
     if (cat === "mutual") return S.following.filter((u) => S.followerIds.has(String(u.pk)));
     if (cat === "bots")   return S.followers.slice(); // şüpheli takipçiler bunlar arasından
+    if (cat === "ghosts") return S.likes ? S.followers.filter((u) => !S.likes.likers.has(String(u.pk))) : [];
     return S.following.slice(); // "idle" ve "all" → takip ettiklerin
   }
 
-  // Bot/sahte heuristikleri
-  // Yalnızca AÇIKÇA otomatik/rastgele adları yakalar. Sesli harfi atılmış normal
-  // adları (yarenclknt = Yaren Çelikkent) YANLIŞ işaretlememek için çok muhafazakâr.
+  // Bot/sahte heuristikleri — yalnızca AÇIKÇA otomatik/rastgele adları yakalar (yanlış pozitife karşı muhafazakâr).
   function isGibberish(name) {
     if (!name) return false;
     const compact = String(name).toLowerCase().replace(/[._]/g, "");
@@ -375,12 +467,33 @@
     _botCache.set(u, { info: u._info, v });
     return v;
   }
-  // Şüpheli sayılma koşulu (kullanıcı adı TEK BAŞINA yeterli değil — yanlış pozitifi önler):
+  // Şüpheli sayılma koşulu (kullanıcı adı TEK BAŞINA yeterli değil — yanlış pozitifi önler)
   function isSuspect(u) {
-    if (u.has_anonymous_profile_picture) return true;                          // profil fotosu yok
-    if (u._info && (u._info.media_count === 0 || u._info.follower_count === 0)) return true; // doğrulanmış boşluk
-    if (isGibberish(u.username) && (!u.full_name || !String(u.full_name).trim())) return true; // rastgele ad + isimsiz
+    if (u.has_anonymous_profile_picture) return true;
+    if (u._info && (u._info.media_count === 0 || u._info.follower_count === 0)) return true;
+    if (isGibberish(u.username) && (!u.full_name || !String(u.full_name).trim())) return true;
     return false;
+  }
+
+  // "Bırakılabilirlik": geri takip etmiyor + uzun süredir/hiç DM yok → yüksek; korunan/doğrulanmış → düşük.
+  function dropScore(u) {
+    const pk = String(u.pk);
+    let s = 0;
+    const reasons = [];
+    if (!S.followerIds.has(pk)) { s += 3; reasons.push("geri takip etmiyor"); }
+    if (S.dmScanned) {
+      const ms = S.dmMap[pk];
+      if (!ms) { s += 2; reasons.push("hiç DM yok"); }
+      else {
+        const d = (Date.now() - ms) / 86400000;
+        if (d > 365) { s += 1.5; reasons.push("1+ yıldır DM yok"); }
+        else if (d > 180) { s += 1; reasons.push("6+ aydır DM yok"); }
+        else if (d < 90) { s -= 2; }
+      }
+    }
+    if (u.is_verified) s -= 1;
+    if (S.whitelist.has(pk)) s -= 10;
+    return { s, reasons };
   }
 
   async function fetchUserInfo(pk) {
@@ -418,7 +531,7 @@
       }
       const ws = []; for (let k = 0; k < conc; k++) ws.push(worker());
       await Promise.all(ws);
-      saveCache();
+      await saveCache();
       summary = S.stopFlag ? "Doğrulama durduruldu." : `Doğrulama tamam ✓ · ${list.length} hesap kontrol edildi`;
     } catch (e) { summary = "Hata: " + e.message; }
     finally { S.running = false; S.stopFlag = false; jobFinish(summary); render(); }
@@ -426,26 +539,26 @@
 
   const coll = new Intl.Collator("tr");
   const SORTS = {
-    name:    { label: "Kullanıcı adı (A→Z)",            fn: (a, b) => coll.compare(a.username || "", b.username || "") },
-    dm_old:  { label: "Son DM: en eski önce",           fn: (a, b) => (S.dmMap[String(a.pk)] || 0) - (S.dmMap[String(b.pk)] || 0), need: "dm" },
-    dm_new:  { label: "Son DM: en yeni önce",           fn: (a, b) => (S.dmMap[String(b.pk)] || 0) - (S.dmMap[String(a.pk)] || 0), need: "dm" },
-    bot:     { label: "Bot skoru (yüksekten)",          fn: (a, b) => botScore(b).score - botScore(a).score },
-    fc_asc:  { label: "Takipçi sayısı (azdan çoğa)",    fn: (a, b) => fcOf(a) - fcOf(b), need: "info" },
-    fc_desc: { label: "Takipçi sayısı (çoktan aza)",    fn: (a, b) => fcOf(b, -1) - fcOf(a, -1), need: "info" },
+    name:    { label: "Kullanıcı adı (A→Z)",              fn: (a, b) => coll.compare(a.username || "", b.username || "") },
+    drop:    { label: "Bırakılabilirlik (önce en uygun)", fn: (a, b) => dropScore(b).s - dropScore(a).s },
+    dm_old:  { label: "Son DM: en eski önce",             fn: (a, b) => (S.dmMap[String(a.pk)] || 0) - (S.dmMap[String(b.pk)] || 0), need: "dm" },
+    dm_new:  { label: "Son DM: en yeni önce",             fn: (a, b) => (S.dmMap[String(b.pk)] || 0) - (S.dmMap[String(a.pk)] || 0), need: "dm" },
+    bot:     { label: "Bot skoru (yüksekten)",            fn: (a, b) => botScore(b).score - botScore(a).score },
+    fc_asc:  { label: "Takipçi sayısı (azdan çoğa)",      fn: (a, b) => fcOf(a) - fcOf(b), need: "info" },
+    fc_desc: { label: "Takipçi sayısı (çoktan aza)",      fn: (a, b) => fcOf(b, -1) - fcOf(a, -1), need: "info" },
   };
   // Takipçi sayısı yalnızca derin doğrulanan hesaplarda bilinir; bilinmeyenler sona.
   function fcOf(u, unknown) { return u._info && typeof u._info.follower_count === "number" ? u._info.follower_count : (unknown === -1 ? -1 : Infinity); }
   function sortKeys(cat) {
-    const keys = ["name", "dm_old", "dm_new"];
-    if (cat === "fans" || cat === "bots") keys.push("bot", "fc_asc", "fc_desc");
-    return keys;
+    if (CATS[cat].sec === "followers") return ["name", "dm_old", "dm_new", "bot", "fc_asc", "fc_desc"];
+    return ["name", "drop", "dm_old", "dm_new"];
   }
   function defaultSort(cat) { return cat === "idle" ? "dm_old" : cat === "bots" ? "bot" : "name"; }
   function currentSort() {
     const k = S.sortBy[S.cat] || defaultSort(S.cat);
     const need = SORTS[k] && SORTS[k].need;
     if (need === "dm" && !S.dmScanned) return defaultSort(S.cat);
-    return SORTS[k] ? k : "name";
+    return SORTS[k] && sortKeys(S.cat).includes(k) ? k : defaultSort(S.cat);
   }
 
   const ACCT_FILTERS = [
@@ -466,9 +579,7 @@
         (u.username || "").toLowerCase().includes(q) ||
         (u.full_name || "").toLowerCase().includes(q));
     }
-    // Şüpheli/Bot: yalnızca gerçek şüpheliler
     if (S.cat === "bots") list = list.filter(isSuspect);
-    // Etkileşimsizler: son DM eşiğine göre süz
     if (S.cat === "idle") {
       const thr = S.idleDays || 0;
       if (thr === -1) list = list.filter((u) => !S.dmMap[String(u.pk)]);
@@ -483,7 +594,28 @@
   // Bu satır seçilebilir mi? (korunanlar takibi bırakmada seçilemez)
   const selectable = (u) => !(CATS[S.cat].action === "unfollow" && S.whitelist.has(String(u.pk)));
 
-  // ================================================================ işlemler
+  // Son 90 günde DM'leştiğin ama korunmayan, takip ettiğin kişiler (akıllı koruma önerisi)
+  function protectSuggestions() {
+    if (!S.dmScanned) return [];
+    const cut = Date.now() - 90 * 86400000;
+    return S.following.filter((u) => { const pk = String(u.pk); return !S.whitelist.has(pk) && (S.dmMap[pk] || 0) > cut; });
+  }
+  async function protectSuggested() {
+    const list = protectSuggestions();
+    if (!list.length) { toast("Önerilecek kimse yok."); return; }
+    const ok = await askConfirm({
+      title: `${list.length} kişi korunsun mu?`,
+      html: "<p>Son 90 günde DM'leştiğin ve takip ettiğin bu kişiler koru listesine eklenir; toplu “Takibi bırak” işlemlerinde atlanırlar.</p>",
+      names: list.map((u) => u.username), okLabel: `Koru (${list.length})`,
+    });
+    if (!ok) return;
+    list.forEach((u) => { S.whitelist.add(String(u.pk)); S.selected.delete(String(u.pk)); });
+    saveWhitelist();
+    toast(`${list.length} kişi koru listesine eklendi.`);
+    render();
+  }
+
+  // ================================================================ tek tek işlem
   async function friendship(kind, pk) {
     const csrf = getCookie("csrftoken");
     if (!csrf) throw new Error("csrftoken yok — sayfayı yenileyin.");
@@ -496,77 +628,21 @@
       },
       body: "container_module=profile",
     });
-    let ok = res.ok;
-    try { const j = await res.json(); ok = ok && (j.status === "ok"); } catch (e) {}
-    if (!ok) throw new Error("HTTP " + res.status);
+    let j = null;
+    try { j = await res.json(); } catch (e) {}
+    const ok = res.ok && (!j || j.status === "ok");
+    if (!ok) {
+      // Instagram kısıtlamayı genellikle "feedback_required" / spam ile bildirir — kuyruk bunu görüp durur
+      const why = j && (j.feedback_title || j.message || (j.spam ? "spam" : ""));
+      const flag = j && (j.feedback_required || j.spam) ? " · feedback_required" : "";
+      throw new Error("HTTP " + res.status + (why ? " · " + why : "") + flag);
+    }
     return true;
   }
 
   function findUser(pk) {
     pk = String(pk);
     return S.followers.find((x) => String(x.pk) === pk) || S.following.find((x) => String(x.pk) === pk);
-  }
-
-  // Ortalama kişi başı süre (sn): 3,5–6,5 sn bekleme + her 6 kişide 45–80 sn mola + istek.
-  const SEC_PER_FRIENDSHIP = 16;
-
-  async function bulkAction(action, pks) {
-    if (guardBusy()) return;
-    const A = ACTIONS[action];
-    const list = pks.filter((pk) => action !== "unfollow" || !S.whitelist.has(String(pk)));
-    const skipped = pks.length - list.length;
-    if (!list.length) { toast("İşlenecek kişi yok (korunanlar hariç tutuldu).", true); return; }
-    const names = list.map((pk) => { const u = findUser(pk); return u ? u.username : String(pk); });
-    const ok = await askConfirm({
-      title: `${list.length} kişi — ${A.btn}`,
-      html: `<p>Aşağıdaki ${list.length} hesap için <b>${esc(A.btn)}</b> işlemi yapılacak.${skipped ? ` Korunan <b>${skipped}</b> hesap hariç tutuldu.` : ""}</p>
-        <p class="igd-note">Hesabını korumak için aralarda otomatik bekleme yapılır. İşlem alttaki tepside sürer; bu arada uygulamayı kullanmaya devam edebilir, istediğin an duraklatıp durdurabilirsin.</p>`,
-      names,
-      estimate: list.length * SEC_PER_FRIENDSHIP,
-      danger: action !== "follow",
-      okLabel: `${A.btn} (${list.length})`,
-    });
-    if (!ok || guardBusy()) return;
-
-    S.running = true; S.stopFlag = false; S.paused = false;
-    startJob({ title: A.title, total: list.length, pausable: true });
-    let done = 0, okN = 0, fail = 0;
-
-    try {
-      for (const pk of list) {
-        await waitIfPaused();
-        if (S.stopFlag) { jobLog("⏹ Kullanıcı durdurdu.", "warn"); break; }
-        const u = findUser(pk);
-        const name = u ? u.username : pk;
-        try {
-          await friendship(A.kind, pk);
-          okN++;
-          jobLog(`✓ @${name} ${A.done}`, "ok");
-          applyLocalChange(action, pk, u);
-          S.selected.delete(String(pk));
-        } catch (e) {
-          fail++;
-          jobLog(`✗ @${name} başarısız (${e.message})`, "err");
-        }
-        done++;
-        jobProgress(done, list.length, okN, fail);
-        if (done % 3 === 0) render();
-        if (done < list.length && !S.stopFlag) {
-          await pSleep(rand(3500, 6500));
-          if (done % 6 === 0 && !S.stopFlag) {
-            const secs = rand(45, 80);
-            jobLog(`⏳ Güvenlik molası ~${secs} sn`, "warn");
-            setStatus(`Güvenlik molası ~${secs} sn`);
-            await pSleep(secs * 1000);
-          }
-        }
-      }
-    } finally {
-      S.running = false; S.stopFlag = false; S.paused = false;
-      jobFinish(`Bitti — başarılı ${okN}, hata ${fail}${done < list.length ? `, ${list.length - done} kişi işlenmedi` : ""}.`);
-      saveCache();
-      render();
-    }
   }
 
   // yerel listeleri güncelle (yeniden tarama gerekmeden)
@@ -584,9 +660,8 @@
     }
   }
 
-  // Elle engelleme yardımcısı: profili ayrı pencerede açar; kullanıcı Instagram'ın
-  // kendi "Engelle"sine basar. Otomatik engelleme Instagram tarafından güvenlik gereği
-  // reddedildiği (oturumu kapattığı) için tek güvenli yol budur.
+  // Elle engelleme yardımcısı: profili ayrı pencerede açar; kullanıcı Instagram'ın kendi "Engelle"sine basar.
+  // Otomatik engelleme Instagram tarafından güvenlik gereği reddedildiği (oturumu kapattığı) için tek güvenli yol budur.
   function openBlockHelper(username) {
     const u = String(username || "").replace(/^@/, "").trim();
     if (!u) return;
@@ -617,10 +692,22 @@
     catch (e) { toast("Kopyalanamadı: " + e.message, true); }
   }
 
+  // Excel/Numbers'da formül olarak çalışabilecek değerleri (=, +, -, @ ile başlayan) metne çevir.
   function csvCell(v) {
-    const s = v == null ? "" : String(v);
-    return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    let s = v == null ? "" : String(v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return /[",\n;']/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
+  function toCSV(head, rows) { return "﻿" + head.join(",") + "\n" + rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n"; }
+  const stampNow = () => fmtDate(Date.now()).replace(/[: ]/g, "-");
+  function saveTextFile(name, content, label, okMsg) {
+    if (post({ type: "export", name, content, label })) { toast(okMsg || `Downloads/${name} dosyasına kaydedildi ✓`); return; }
+    // Uygulama dışı (tarayıcı) yedeği
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  }
+
   function exportCSV() {
     const { list, what } = exportSet();
     if (!list.length) { toast("Dışa aktarılacak kimse yok.", true); return; }
@@ -630,28 +717,18 @@
       return [u.username, u.full_name, `https://www.instagram.com/${u.username}/`,
         u.is_private ? "evet" : "hayır", u.is_verified ? "evet" : "hayır", S.whitelist.has(pk) ? "evet" : "hayır",
         S.dmScanned ? (ms ? fmtDate(ms) : "yok") : "", botScore(u).reasons.join(" · "),
-        inf.media_count, inf.follower_count, inf.following_count].map(csvCell).join(",");
+        inf.media_count, inf.follower_count, inf.following_count];
     });
-    // Excel'in Türkçe karakterleri doğru açması için BOM
-    const content = "﻿" + head.join(",") + "\n" + rows.join("\n") + "\n";
-    const stamp = fmtDate(Date.now()).replace(/[: ]/g, "-");
-    const name = `instagram-${S.cat}-${stamp}.csv`;
-    if (post({ type: "export", name, content, label: "CSV dışa aktarıldı" })) {
-      toast(`${list.length} ${what} hesap Downloads/${name} dosyasına kaydedildi ✓`);
-      return;
-    }
-    // Uygulama dışı (tarayıcı) yedeği
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
-    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    const name = `instagram-${S.cat}-${stampNow()}.csv`;
+    saveTextFile(name, toCSV(head, rows), "CSV dışa aktarıldı", `${list.length} ${what} hesap Downloads/${name} dosyasına kaydedildi ✓`);
   }
 
-  // Tarama sonuçlarını temizle (koru listesi ve ayarlar kalır)
+  // Tarama sonuçlarını temizle (koru listesi, geçmiş, raporlar ve ayarlar kalır)
   async function clearAll() {
     if (guardBusy()) return;
     const ok = await askConfirm({
       title: "Tarama sonuçları temizlensin mi?",
-      html: `<p>Takip listesi, takipçiler, şüpheliler ve DM listeleri silinir. <b>Koru listen, tema ve bildirim ayarların kalır.</b></p>
+      html: `<p>Takip listesi, takipçiler, şüpheliler, beğeniler ve DM listeleri silinir. <b>Koru listen, işlem geçmişin, raporların, grafik verisi ve ayarların kalır.</b></p>
         <p class="igd-note">Instagram hesabında hiçbir şey değişmez; yalnızca bu uygulamanın kaydettiği sonuçlar silinir.</p>`,
       danger: true, okLabel: "Temizle",
     });
@@ -659,12 +736,12 @@
     S.following = []; S.followers = [];
     S.followingIds = new Set(); S.followerIds = new Set();
     S.scanned = false; S.detecting = false;
-    S.followersFull = false; S.followersLoading = false;
+    S.followersFull = false; S.followersTrunc = false; S.followersLoading = false;
     S.followerCount = null; S.followingCount = null;
     S.followingScanTime = 0; S.followersScanTime = 0; S.dmScanTime = 0;
     S.dmMap = {}; S.dmThreads = []; S.dmScanned = false; S.dmSel.clear();
-    S.selected.clear(); S.query = ""; S._botVerifyTried = false;
-    try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
+    S.selected.clear(); S.query = ""; S._botVerifyTried = false; S.likes = null; S.resume = null;
+    await Promise.all([DB.del(K.cache), DB.del(K.likes), DB.del(K.resumeFollowers)]).catch(() => {});
     S.statusText = "Sonuçlar temizlendi.";
     render();
     toast("Tarama sonuçları temizlendi.");

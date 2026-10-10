@@ -133,7 +133,8 @@
 
     S.dmBusy = true; S.stopFlag = false; S.paused = false;
     startJob({ title: "Sohbetler siliniyor", total: ids.length, pausable: true });
-    let done = 0, okN = 0, fail = 0, had404 = false;
+    let done = 0, okN = 0, fail = 0, had404 = false, consecutive = 0;
+    const hist = [];
     try {
       for (const id of ids) {
         await waitIfPaused();
@@ -141,12 +142,17 @@
         const name = threadName(S.dmThreads.find((x) => x.id === id));
         try {
           await hideThread(id);
-          okN++; jobLog(`✓ ${name} silindi`, "ok");
+          okN++; consecutive = 0; jobLog(`✓ ${name} silindi`, "ok");
+          hist.push({ t: Date.now(), a: "dmdelete", pk: id, u: name.replace(/^@/, ""), ok: true });
           S.dmThreads = S.dmThreads.filter((x) => x.id !== id);
           S.dmSel.delete(id);
-        } catch (e) { fail++; if (/404/.test(e.message)) had404 = true; jobLog(`✗ ${name} silinemedi (${e.message})`, "err"); }
+        } catch (e) {
+          fail++; consecutive++; if (/404/.test(e.message)) had404 = true;
+          jobLog(`✗ ${name} silinemedi (${e.message})`, "err");
+        }
         done++;
         jobProgress(done, ids.length, okN, fail);
+        if (consecutive >= 3) { jobLog("Art arda 3 hata — hesabını korumak için durduruldu.", "warn"); break; }
         if (done < ids.length && !S.stopFlag) {
           await pSleep(rand(1500, 3000));
           if (done % 10 === 0 && !S.stopFlag) { jobLog("⏳ Güvenlik molası ~20 sn...", "warn"); await pSleep(20000); }
@@ -158,7 +164,8 @@
       }
     } finally {
       S.dmBusy = false; S.stopFlag = false; S.paused = false;
-      jobFinish(`Bitti — silinen ${okN}, hata ${fail}.`);
+      if (hist.length) { hist.forEach((h) => S.hist.push(h)); histAdd(hist).catch(() => {}); }
+      jobFinish(`Bitti — silinen ${okN}, hata ${fail}${done < ids.length ? `, ${ids.length - done} sohbet işlenmedi` : ""}.`);
       saveCache();
       render();
     }
@@ -258,22 +265,27 @@
       }
 
       jobReset({ title: `${who}: mesajlar geri çekiliyor`, total: mine.length, pausable: true });
-      let done = 0, okN = 0, fail = 0;
+      let done = 0, okN = 0, fail = 0, consecutive = 0;
       for (const it of mine) {
         await waitIfPaused();
         if (S.stopFlag) { jobLog("⏹ Kullanıcı durdurdu.", "warn"); break; }
         try {
           await unsendItem(threadId, it.id);
-          okN++; jobLog(`✓ geri çekildi: ${it.text ? '"' + it.text.slice(0, 40) + '"' : "[" + it.type + "]"}`, "ok");
-        } catch (e) { fail++; jobLog(`✗ geri çekilemedi (${e.message})`, "err"); }
+          okN++; consecutive = 0; jobLog(`✓ geri çekildi: ${it.text ? '"' + it.text.slice(0, 40) + '"' : "[" + it.type + "]"}`, "ok");
+        } catch (e) { fail++; consecutive++; jobLog(`✗ geri çekilemedi (${e.message})`, "err"); }
         done++;
         jobProgress(done, mine.length, okN, fail);
+        if (consecutive >= 3) { jobLog("Art arda 3 hata — hesabını korumak için durduruldu.", "warn"); break; }
         if (done < mine.length && !S.stopFlag) {
           await pSleep(rand(2000, 4000)); // mesaj geri çekmede daha temkinli
           if (done % 10 === 0 && !S.stopFlag) { jobLog("⏳ Güvenlik molası ~30 sn...", "warn"); await pSleep(30000); }
         }
       }
       summary = `${who}: ${okN} mesaj geri çekildi${fail ? `, ${fail} hata` : ""}.`;
+      if (okN) {
+        const h = { t: Date.now(), a: "unsend", pk: threadId, u: who.replace(/^@/, "") + ` (${okN} mesaj)`, ok: true };
+        S.hist.push(h); histAdd([h]).catch(() => {});
+      }
     } catch (e) {
       summary = "Hata: " + e.message; toast(e.message, true);
     } finally { S.dmBusy = false; S.stopFlag = false; S.paused = false; jobFinish(summary); render(); }

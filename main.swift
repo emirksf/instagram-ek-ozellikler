@@ -320,6 +320,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         completionHandler(a.runModal() == .alertFirstButtonReturn ? tf.stringValue : nil)
     }
 
+    // <input type="file"> (Ayarlar → Yedekten geri yükle) için dosya seçme penceresi.
+    func webView(_ wv: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.message = "Geri yüklenecek yedek dosyasını seç"
+        completionHandler(panel.runModal() == .OK ? panel.urls : nil)
+    }
+
     // target=_blank / window.open → TEK yeniden kullanılan pencerede aç.
     // nil döneriz ki WebKit kendi (boş kalabilen) penceresini AÇMASIN — boş kare pencere sorunu bunu önler.
     func webView(_ wv: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

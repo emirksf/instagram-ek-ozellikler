@@ -3,27 +3,34 @@
   const SOURCES = [
     { key: "following", name: "Takip listesi", icon: "users", feeds: "Geri takip etmeyenler · Karşılıklı · Etkileşimsizler · Takip ettiklerin",
       has: () => S.scanned, t: () => S.followingScanTime, n: () => `${fmtN(S.following.length)} kişi`, run: () => runScan() },
-    { key: "followers", name: "Takipçiler", icon: "user", feeds: "Hayranların · Şüpheli/Bot · Rapor",
+    { key: "followers", name: "Takipçiler", icon: "user", feeds: "Hayranların · Şüpheli/Bot · Hayaletler · Rapor",
       has: () => S.followersFull || S.followers.length > 0, partial: () => !S.followersFull && !S.followersLoading && S.followers.length > 0,
       t: () => S.followersScanTime, n: () => `${fmtN(S.followers.length)}${S.followerCount ? " / " + fmtN(S.followerCount) : ""} takipçi`, run: () => fetchAllFollowers() },
+    { key: "likes", name: "Beğeniler", icon: "heart", feeds: "Hayaletler (son gönderilerini beğenmeyenler)",
+      has: () => !!S.likes, t: () => S.likes && S.likes.t, n: () => `${S.likes.posts} gönderi · ${fmtN(S.likes.likers.size)} beğenen`, run: () => scanLikes() },
     { key: "dm", name: "DM kutusu", icon: "message", feeds: "Etkileşimsizler · DM'lerim",
       has: () => S.dmScanned, t: () => S.dmScanTime, n: () => `${fmtN(S.dmThreads.length)} sohbet`, run: () => scanDM() },
   ];
+  const PAGE_SOURCES = { analysis: ["following", "dm"], followers: ["followers", "likes"], dm: ["dm"] };
+  const resumable = () => !!(S.resume && S.resume.maxId && Date.now() - S.resume.t < RESUME_MAX_AGE && S.followers.length === S.resume.n && !S.followersFull);
   const srcBusy = (key) => S.job && !S.job.finished && S.job.src === key;
   const srcHas = (key) => SOURCES.find((s) => s.key === key).has();
-  const LOCK_HINT = { following: "takip listesi taraması gerekli", followers: "takipçi taraması gerekli", dm: "DM taraması gerekli" };
+  const LOCK_HINT = { following: "takip listesi taraması gerekli", followers: "takipçi taraması gerekli", dm: "DM taraması gerekli", likes: "beğeni taraması gerekli" };
 
   function renderSources() {
     const el = $("igd-sources"); if (!el) return;
-    el.innerHTML = SOURCES.map((s) => {
+    const keys = PAGE_SOURCES[S.section] || [];
+    el.innerHTML = SOURCES.filter((s) => keys.includes(s.key)).map((s) => {
       const has = s.has(), busy = srcBusy(s.key), partial = s.partial && s.partial();
+      const trunc = s.key === "followers" && S.followersTrunc && !busy;
       let r2;
       if (busy) r2 = `<span class="igd-spin"></span> Taranıyor…`;
+      else if (trunc) r2 = `Eksik: Instagram ${esc(s.n())} verdi`;
       else if (partial) r2 = `Kısmi (durduruldu) · ${esc(s.n())}`;
       else if (has) r2 = `${s.t() ? esc(ageStr(s.t())) : "zamanı bilinmiyor"} · ${esc(s.n())}`;
       else r2 = "Henüz taranmadı";
-      const label = has && !partial ? "Yenile" : partial ? "Yeniden tara" : "Tara";
-      return `<div class="igd-src ${has ? "" : "none"} ${partial ? "partial" : ""}" role="group" aria-label="Veri kaynağı: ${esc(s.name)}">
+      const label = has && !partial ? "Yenile" : partial ? (s.key === "followers" && resumable() ? "Devam et" : "Yeniden tara") : "Tara";
+      return `<div class="igd-src ${has ? "" : "none"} ${partial || trunc ? "partial" : ""}" role="group" aria-label="Veri kaynağı: ${esc(s.name)}">
         <div class="r1">${ic(s.icon, 14)} ${esc(s.name)}
           <button class="igd-btn sm ${has && !partial ? "" : "primary"}" data-src="${s.key}" ${isBusy() ? "disabled" : ""}
             aria-label="${esc(s.name)}: ${label}">${ic("refresh", 12)} ${label}</button></div>
@@ -80,6 +87,7 @@
     if (src === "following" && !S.scanned) return null;
     if (src === "followers" && !(srcHas("followers") || S.followersLoading)) return null;
     if (src === "dm" && (!S.dmScanned || !S.scanned)) return null;
+    if (src === "likes" && (!S.likes || !S.followers.length)) return null;
     if (S.detecting && (k === "non" || k === "mutual")) return "…";
     if (k === "bots") return fmtN(S.followers.filter(isSuspect).length);
     if (k === "idle") return fmtN(S.following.filter((u) => { const ms = S.dmMap[String(u.pk)]; return !ms || ms < Date.now() - 180 * 86400000; }).length);
@@ -91,7 +99,7 @@
     const keys = Object.keys(CATS).filter((k) => CATS[k].sec === S.section);
     el.innerHTML = keys.map((k) => {
       const c = tabCount(k);
-      const lockSrc = c === null ? (CATS[k].src === "dm" && S.dmScanned ? "following" : CATS[k].src) : null;
+      const lockSrc = c === null ? (CATS[k].src === "dm" && S.dmScanned ? "following" : CATS[k].src === "likes" && !S.followers.length ? "followers" : CATS[k].src) : null;
       const cnt = c === null
         ? `<span class="c" title="${esc(LOCK_HINT[lockSrc])}">${ic("lock", 12)}</span>`
         : `<span class="c">${c}</span>`;
@@ -146,26 +154,39 @@
   // Sekmenin listesi gösterilemiyorsa nedenini anlatan kart (null → liste gösterilebilir)
   function listBlocker() {
     const cat = CATS[S.cat];
-    if (!isLoggedIn() && !S.scanned && !(cat.src === "followers" && S.followers.length)) {
+    const needsFollowers = cat.src === "followers" || cat.src === "likes";
+    if (!S.loaded) return emptyCard({ icon: "refresh", spin: true, title: "Kayıtlı sonuçlar yükleniyor…" });
+    if (!isLoggedIn() && !S.scanned && !(needsFollowers && S.followers.length)) {
       return emptyCard({ icon: "instagram", title: "Instagram oturumu gerekli",
         html: "<p>Analiz kendi Instagram oturumunla yapılır. Önce Instagram'da giriş yap; panel sonra kaldığın yerden açılır.</p>",
         actions: [{ label: "Instagram'da giriş yap", cta: "login", primary: true, icon: "instagram" }] });
     }
-    if (cat.src !== "followers" && !S.scanned) {
+    if (!needsFollowers && !S.scanned) {
       return emptyCard({ icon: "users", title: "Önce takip listeni tara",
         html: "<p>Kimleri takip ettiğini ve kimin seni geri takip ettiğini öğrenir. Genelde 1–2 dakika sürer; tarama alttaki tepside ilerler.</p>",
         actions: [{ label: "Takip listesini tara", cta: "scan", primary: true, icon: "refresh" }] });
     }
-    if (S.detecting && cat.src !== "followers") {
+    if (S.needRescan && (S.cat === "non" || S.cat === "mutual")) {
+      return emptyCard({ icon: "alert", title: "Geri takip bilgisi yeniden taranmalı",
+        html: "<p>Kayıtlı geri takip bilgisi, Instagram'ın eksik verdiği bir takipçi listesinden hesaplanmış. Bu durumda seni takip eden kişiler de bu listede görünebilir. Güvenli sonuç için takip listesini yeniden tara (1–2 dk).</p>",
+        actions: [{ label: "Takip listesini tara", cta: "scan", primary: true, icon: "refresh" }] });
+    }
+    if (S.detecting && !needsFollowers) {
       return emptyCard({ icon: "users", spin: true, title: "Kim geri takip ediyor analiz ediliyor…",
         html: `<p>Takip ettiğin ${fmtN(S.following.length)} kişi kontrol ediliyor. Sonuç kesinleşince liste burada görünecek.</p>` });
     }
-    if (cat.src === "followers" && !S.followers.length && !S.followersLoading) {
+    if (needsFollowers && !S.followers.length && !S.followersLoading) {
       const cnt = S.followerCount != null ? fmtN(S.followerCount) : "tüm";
       return emptyCard({ icon: "lock", title: "Bu sekme için takipçi taraması gerekli",
-        html: `<p>${S.cat === "bots" ? "Bot / sahte / boş takipçileri bulmak" : "Seni takip edip senin takip etmediklerini görmek"} için <b>${esc(cnt)} takipçinin tamamı</b> taranmalı. Takip listesinden <b>ayrı ve daha uzun</b> bir taramadır; taradıkça listelenir, istediğin an durdurabilirsin.</p>`,
+        html: `<p>${S.cat === "bots" ? "Bot / sahte / boş takipçileri bulmak" : S.cat === "ghosts" ? "Son gönderilerini beğenmeyen takipçileri bulmak" : "Seni takip edip senin takip etmediklerini görmek"} için <b>${esc(cnt)} takipçinin tamamı</b> taranmalı. Takip listesinden <b>ayrı ve daha uzun</b> bir taramadır; taradıkça listelenir, istediğin an durdurabilirsin.</p>`,
         actions: [{ label: "Takipçileri tara", cta: "foll", primary: true, icon: "refresh" }],
         note: S.cat === "bots" ? "Rastgele ad, fotosuz ve isimsiz hesaplar işaretlenir; gönderi/takipçi sayıları otomatik getirilir." : "" });
+    }
+    if (cat.src === "likes" && !S.likes) {
+      return emptyCard({ icon: "heart", title: "Hayalet takipçiler için beğeni taraması gerekli",
+        html: `<p>Son <b>${ghostPosts()}</b> gönderini beğenenler alınır; hiçbirini beğenmemiş takipçilerin burada listelenir. Yalnızca okuma yapar, ~${ghostPosts() + 1} istek.</p>`,
+        actions: [{ label: "Beğenileri tara", cta: "likes", primary: true, icon: "refresh" }],
+        note: "Instagram popüler gönderilerde beğenen listesini kısaltabildiği için sonuç yaklaşıktır; kapsama oranı listenin üstünde gösterilir." });
     }
     if (cat.src === "dm" && !S.dmScanned) {
       return emptyCard({ icon: "lock", title: "Bu sekme için DM taraması gerekli",
@@ -179,11 +200,24 @@
   function renderListHead() {
     const el = $("igd-listhead"); if (!el) return;
     let h = "";
-    if (S.followersLoading && CATS[S.cat].src === "followers") {
+    const fsrc = CATS[S.cat].src === "followers" || CATS[S.cat].src === "likes";
+    if (S.followersLoading && fsrc) {
       h += `<div class="igd-bar2"><span class="igd-spin"></span> Takipçiler taranıyor: ${fmtN(S.followers.length)}${S.followerCount ? " / " + fmtN(S.followerCount) : ""} — taradıkça güncelleniyor.</div>`;
-    } else if (CATS[S.cat].src === "followers" && !S.followersFull && S.followers.length > 0) {
+    } else if (fsrc && S.followersTrunc) {
+      h += `<div class="igd-bar2 warn">${ic("alert", 14)} Instagram takipçi listenin yalnızca ${fmtN(S.followers.length)} / ${fmtN(S.followerCount)} kısmını verdi — bu liste eksik olabilir.</div>`;
+    } else if (fsrc && !S.followersFull && S.followers.length > 0) {
       h += `<div class="igd-bar2 warn">${ic("alert", 14)} Kısmi liste: ${fmtN(S.followers.length)} takipçi tarandı (durduruldu).
-        <button class="igd-btn sm" data-cta="foll">Takipçileri yeniden tara</button></div>`;
+        <button class="igd-btn sm" data-cta="foll">${resumable() ? "Kaldığı yerden devam et" : "Takipçileri yeniden tara"}</button></div>`;
+    }
+    if (S.cat === "ghosts" && S.likes) {
+      const L = S.likes, cov = L.totalLikes ? Math.round(Math.min(1, L.gotLikes / L.totalLikes) * 100) : 100;
+      h += `<div class="igd-bar2 ${cov < 90 ? "warn" : ""}">${ic("heart", 14)} Son ${L.posts} gönderinden hiçbirini beğenmemiş takipçiler · beğeni kapsaması %${cov} (${esc(ageStr(L.t))})
+        ${cov < 90 ? "· Instagram bazı beğenen listelerini kısalttı; çıkarmadan önce gözden geçir." : ""}</div>`;
+    }
+    const sug = CATS[S.cat].sec === "analysis" && !S.protectHintHidden ? protectSuggestions() : [];
+    if (sug.length) {
+      h += `<div class="igd-bar2">${ic("shield", 14)}<span>Son 90 günde DM'leştiğin <b>${sug.length}</b> kişi korunmuyor.</span>
+        <button class="igd-btn sm" id="igd-protsug">Hepsini koru…</button><button class="igd-btn sm ghost" id="igd-protsug-hide">Gizle</button></div>`;
     }
     if (S.cat === "idle" && S.dmScanned && S.scanned) {
       const opts = [[0, "Tümü"], [90, "3+ ay etkileşimsiz"], [180, "6+ ay etkileşimsiz"], [365, "1+ yıl etkileşimsiz"], [-1, "Hiç DM yok"]];
@@ -208,6 +242,8 @@
     el.innerHTML = h;
     const s = $("igd-idlesel"); if (s) s.onchange = () => { S.idleDays = parseInt(s.value, 10); S.selected.clear(); render(); };
     const bv = $("igd-botverify"); if (bv) bv.onclick = deepVerifyBots;
+    const ps = $("igd-protsug"); if (ps) ps.onclick = protectSuggested;
+    const ph = $("igd-protsug-hide"); if (ph) ph.onclick = () => { S.protectHintHidden = true; lsSet("igd_protect_hint_hidden", "1"); render(); };
     const all = $("igd-all"); if (all) all.onchange = (e) => selectAllVisible(e.target.checked);
     const sc = $("igd-selclear"); if (sc) sc.onclick = () => { S.selected.clear(); S.lastSelIdx = -1; render(); };
     el.querySelectorAll("[data-cta]").forEach((b) => b.onclick = () => runCta(b.dataset.cta));
@@ -231,6 +267,10 @@
       tags += `<span class="igd-tag dm ${!ms ? "never" : days >= 180 ? "old" : ""}">${dmAgoLabel(u.pk)}</span>`;
     }
     let line2 = esc(u.full_name);
+    if (CATS[S.cat].sec === "analysis" && currentSort() === "drop") {
+      const r = dropScore(u).reasons;
+      if (r.length) line2 = `<b>${esc(r.join(" · "))}</b>${u.full_name ? " · " + esc(u.full_name) : ""}`;
+    }
     if (S.cat === "bots") {
       const r = botScore(u).reasons;
       if (r.length) tags += `<span class="igd-tag bot">${esc(r.join(" · "))}</span>`;
@@ -261,6 +301,7 @@
     else if (cta === "dm") scanDM();
     else if (cta === "login") showInstagram();
     else if (cta === "report") generateReport();
+    else if (cta === "likes") scanLikes();
   }
 
   // Satır tıklama: düğme/bağlantı kendi işini yapar; satırın geri kalanı seçimi değiştirir (Shift = aralık).
@@ -335,7 +376,7 @@
     else mountVList(box, S.vis, rowHtml);
     updateBar();
     // Şüpheli sekmesinde gönderi/takipçi sayılarını bir kez OTOMATİK getir
-    if (S.cat === "bots" && !blocker && !isBusy() && !S._botVerifyTried && S.followersFull && S.vis.length && !S.vis.some((u) => u._info)) {
+    if (S.cat === "bots" && !blocker && !isBusy() && !S._botVerifyTried && (S.followersFull || S.followersTrunc) && S.vis.length && !S.vis.some((u) => u._info)) {
       S._botVerifyTried = true;
       setTimeout(() => deepVerifyBots(), 60);
     }

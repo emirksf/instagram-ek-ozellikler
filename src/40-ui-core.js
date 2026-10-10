@@ -32,6 +32,9 @@
     user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
     arrowleft: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
     sparkle: '<path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+    heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/>',
   };
   function ic(name, size) {
     size = size || 16;
@@ -104,7 +107,7 @@
   .igd-loginbar{display:flex;align-items:center;gap:10px;padding:10px 20px;background:var(--igd-dbg);color:var(--igd-dtx);border-bottom:1px solid var(--igd-dbd);font-size:13px;}
 
   /* Veri kaynakları */
-  .igd-sources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 20px 0;}
+  .igd-sources{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;padding:12px 20px 0;}
   .igd-src{display:flex;flex-direction:column;gap:3px;min-width:0;background:var(--igd-card);border:1px solid var(--igd-border2);border-radius:12px;padding:9px 12px;}
   .igd-src.none{border-style:dashed;}
   .igd-src .r1{display:flex;align-items:center;gap:7px;font-weight:700;font-size:13px;}
@@ -219,6 +222,24 @@
   .igd-tray.paused .igd-prog>i{filter:grayscale(1);opacity:.6;}
   .igd-tray-log{max-height:220px;overflow:auto;padding:8px 20px 10px;border-bottom:1px solid var(--igd-border);font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;}
   .igd-tray-log div{padding:2px 0;}
+
+  /* Grafik (takipçi sayısı) */
+  .igd-chartbox{position:relative;background:var(--igd-card);border:1px solid var(--igd-border2);border-radius:14px;padding:14px 16px 10px;margin:12px 0;}
+  .igd-chartbox .hero{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px;}
+  .igd-chartbox .hero b{font-size:24px;}
+  .igd-chartbox .hero .d{font-size:13px;font-weight:600;}
+  .igd-chartbox .hero .d.up{color:var(--igd-ok);} .igd-chartbox .hero .d.down{color:var(--igd-dtx);}
+  .igd-chart{width:100%;height:200px;display:block;}
+  .igd-chart .grid{stroke:var(--igd-border);stroke-width:1;}
+  .igd-chart .ax{fill:var(--igd-muted);font-size:11px;}
+  .igd-chart .ln{fill:none;stroke:var(--igd-focus);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;}
+  .igd-chart .xh{stroke:var(--igd-muted);stroke-width:1;stroke-dasharray:3 3;}
+  .igd-chart .dot{fill:var(--igd-focus);stroke:var(--igd-card);stroke-width:2;}
+  .igd-tip{position:absolute;pointer-events:none;background:var(--igd-header);border:1px solid var(--igd-border3);border-radius:8px;padding:6px 9px;font-size:12px;box-shadow:var(--igd-shadow);white-space:nowrap;}
+  .igd-tip b{display:block;font-size:13px;}
+  .igd-chartbox details{margin-top:6px;font-size:12px;color:var(--igd-muted2);}
+  .igd-chartbox table{border-collapse:collapse;margin-top:6px;}
+  .igd-chartbox td,.igd-chartbox th{padding:3px 12px 3px 0;text-align:left;font-variant-numeric:tabular-nums;}
 
   /* Diyaloglar */
   .igd-modal{position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;background:var(--igd-ov);}
@@ -477,7 +498,9 @@
   function renderTray() {
     const el = $("igd-tray"); if (!el) return;
     const j = S.job;
-    const mode = !j ? "idle" : j.finished ? "done" : "run";
+    const q = S.queue && queueLeft(S.queue) > 0 ? S.queue : null;
+    const mode = !j ? (q ? "queue" : "idle") : j.finished ? "done" : "run";
+    if (mode === "queue") { renderQueueRow(el, q); return; }
     const key = mode + (j ? "|" + j.pausable + "|" + j.stoppable + "|" + j.t0 : "");
     if (el.dataset.key !== key) {
       el.dataset.key = key;
@@ -533,6 +556,28 @@
       j.log.forEach((l) => box.appendChild(logLine(l.text, l.kind)));
       box.scrollTop = box.scrollHeight;
     } else if (!j.showLog) box.hidden = true;
+  }
+
+  // Bekleyen / yarım kalan kuyruk satırı
+  function renderQueueRow(el, q) {
+    el.dataset.key = "queue|" + q.state + "|" + q.idx;
+    el.classList.remove("paused");
+    const A = ACTIONS[q.action];
+    const stateTxt = q.state === "wait" ? `Günlük sınır doldu — ${fmtClock(q.resumeAt || nextSlotAt())} itibarıyla kendiliğinden devam edecek`
+      : q.state === "blocked" ? "Instagram işlemleri reddetti — beklemen önerilir"
+      : "Yarım kaldı";
+    const pct = Math.round(q.idx / q.items.length * 100);
+    el.innerHTML = `<div class="igd-tray-row">
+      <div class="igd-tray-main" role="status">
+        <div class="igd-tray-t"><b>Kuyruk: ${esc(A.btn)}</b><span>${esc(stateTxt)}</span></div>
+        <div class="igd-prog"><i class="igd-grad" style="width:${pct}%"></i></div>
+        <div class="igd-tray-m">${fmtN(q.idx)} / ${fmtN(q.items.length)} · başarılı ${q.ok} · hata ${q.fail} · kalan ${fmtN(queueLeft(q))}</div>
+      </div>
+      <button class="igd-btn sm primary" id="igd-q-resume" ${isBusy() ? "disabled" : ""}>${ic("play", 13)} ${q.state === "wait" ? "Şimdi dene" : "Devam et"}</button>
+      <button class="igd-btn sm danger" id="igd-q-cancel">${ic("x", 13)} İptal</button>
+    </div>`;
+    $("igd-q-resume").onclick = resumeQueue;
+    $("igd-q-cancel").onclick = cancelQueue;
   }
 
   // --- Sanal liste: yalnızca görünen ~20 satırı çizer (30 bin takipçide de akıcı) ---

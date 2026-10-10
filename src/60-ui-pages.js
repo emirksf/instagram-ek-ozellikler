@@ -180,13 +180,14 @@
     }
   }
 
-  // ================================================================ Rapor sayfası
+  // ================================================================ Rapor sayfası (grafik + gelen/ayrılan)
+  const RANGES = [[7, "7 gün"], [30, "30 gün"], [90, "90 gün"], [0, "Tümü"]];
   function buildReportPage(page) {
     page.innerHTML = `
       <div class="igd-toolbar">
         <button class="igd-btn primary" id="igd-rep-run">${ic("report")} Raporu oluştur</button>
         <label class="igd-chk"><input type="checkbox" id="igd-rep-auto" ${lsGet("igd_report_auto", "0") === "1" ? "checked" : ""}/> Ayda bir otomatik (uygulama açıkken)</label>
-        <span class="igd-note">Takipçi listenin tamamını önceki raporla karşılaştırır.</span>
+        <span class="igd-note">Rapor, tam takipçi listeni önceki raporla karşılaştırır.</span>
       </div>
       <div class="igd-scroll" id="igd-rep-body" style="padding:0 20px 20px;"></div>`;
     $("igd-rep-run").onclick = generateReport;
@@ -194,7 +195,7 @@
       const on = e.target.checked;
       lsSet("igd_report_auto", on ? "1" : "0");
       if (on) {
-        if (!loadReportSnap()) toast("Önce bir kez “Raporu oluştur” ile temel oluştur; sonra ayda bir otomatik çalışır.", true);
+        if (!S.reportBase) toast("Önce bir kez “Raporu oluştur” ile temel oluştur; sonra ayda bir otomatik çalışır.", true);
         else toast("Aylık otomatik rapor açıldı.");
         if (window.__igdWatch && window.__igdWatch.ensureTimer) window.__igdWatch.ensureTimer();
       } else toast("Aylık otomatik rapor kapatıldı.");
@@ -202,59 +203,259 @@
     $("igd-rep-body").onclick = (e) => {
       const s = e.target.closest("[data-sb]"); if (s) sb(s.dataset.sb);
       const c = e.target.closest("[data-cta]"); if (c) runCta(c.dataset.cta);
+      const r = e.target.closest("[data-range]"); if (r) { S.chartRange = +r.dataset.range; lsSet("igd_chart_range", String(S.chartRange)); render(); }
     };
+    // Grafik ve rapor verisini tazele (izleyici arka planda yeni nokta eklemiş olabilir)
+    Promise.all([DB.get(K.series), loadReportState()]).then(([s]) => { S.series = s || []; if (S.section === "report") render(); }).catch(() => {});
+  }
+
+  function seriesInRange() {
+    const days = S.chartRange;
+    const pts = S.series || [];
+    if (!days) return pts;
+    const cut = Date.now() - days * 86400000;
+    const inR = pts.filter((p) => p[0] >= cut);
+    // Aralığın başındaki değeri de göster (çizgi aralık başından başlasın)
+    const before = pts.filter((p) => p[0] < cut).pop();
+    return before ? [[cut, before[1]], ...inR] : inR;
+  }
+
+  function chartHtml() {
+    const pts = seriesInRange();
+    const seg = `<div class="igd-seg" role="group" aria-label="Zaman aralığı">${RANGES.map(([d, l]) => `<button data-range="${d}" class="${S.chartRange === d ? "on" : ""}" aria-pressed="${S.chartRange === d}">${l}</button>`).join("")}</div>`;
+    if (pts.length < 2) {
+      return `<div class="igd-chartbox"><div class="hero"><span class="igd-sp"></span>${seg}</div>` + emptyCard({ compact: true, icon: "analysis", title: "Grafik için veri birikiyor",
+        html: `<p>İzleyici takipçi sayını 30 dakikada bir kaydeder (tek küçük istek). Birkaç kayıt oluşunca takipçi grafiğin burada görünür.${lsGet("igd_series_on", "1") === "0" ? " <b>Kayıt şu an Ayarlar'da kapalı.</b>" : ""}</p>` }) + `</div>`;
+    }
+    const first = pts[0][1], last = pts[pts.length - 1][1], diff = last - first;
+    const label = (RANGES.find(([d]) => d === S.chartRange) || RANGES[1])[1];
+    const rows = (S.series || []).slice(-30).reverse().map(([t, n]) => `<tr><td>${esc(fmtDate(t))}</td><td>${fmtN(n)}</td></tr>`).join("");
+    return `<div class="igd-chartbox">
+      <div class="hero"><b>${fmtN(last)}</b><span class="d ${diff > 0 ? "up" : diff < 0 ? "down" : ""}">${diff > 0 ? "+" : ""}${fmtN(diff)} · ${esc(label)}</span>
+        <span class="igd-note">takipçi</span><span class="igd-sp"></span>${seg}</div>
+      <div id="igd-chart-wrap" style="position:relative;"></div>
+      <details><summary>Tablo olarak göster (son 30 kayıt)</summary><table><thead><tr><th>Tarih</th><th>Takipçi</th></tr></thead><tbody>${rows}</tbody></table></details>
+    </div>`;
+  }
+
+  // Tek seri çizgi grafik: tek eksen, ince çizgi, sessiz ızgara, üzerine gelince çizgi + ipucu.
+  function drawChart(wrap, pts) {
+    const W = Math.max(320, wrap.clientWidth || 700), H = 200, ml = 58, mr = 14, mt = 10, mb = 24;
+    const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+    let lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1]));
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.08; lo = Math.floor(lo - pad); hi = Math.ceil(hi + pad);
+    const X = (t) => ml + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (W - ml - mr);
+    const Y = (v) => mt + (1 - (v - lo) / (hi - lo)) * (H - mt - mb);
+    const ticks = [0, 1, 2, 3].map((i) => Math.round(lo + (hi - lo) * i / 3));
+    const day = (t) => { const d = new Date(t); return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}`; };
+    const xt = [t0, (t0 + t1) / 2, t1];
+    const d = pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+    wrap.innerHTML = `<svg class="igd-chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Takipçi sayısı grafiği: ${fmtN(pts[0][1])} → ${fmtN(pts[pts.length - 1][1])}">
+      ${ticks.map((v) => `<line class="grid" x1="${ml}" x2="${W - mr}" y1="${Y(v)}" y2="${Y(v)}"/><text class="ax" x="${ml - 8}" y="${Y(v) + 4}" text-anchor="end">${fmtN(v)}</text>`).join("")}
+      ${xt.map((t, i) => `<text class="ax" x="${X(t)}" y="${H - 6}" text-anchor="${["start", "middle", "end"][i]}">${day(t)}</text>`).join("")}
+      <path class="ln" d="${d}"/>
+      <line class="xh" id="igd-xh" y1="${mt}" y2="${H - mb}" visibility="hidden"/>
+      <circle class="dot" id="igd-xd" r="5" visibility="hidden"/>
+      <rect id="igd-hit" x="${ml}" y="0" width="${W - ml - mr}" height="${H}" fill="transparent"/>
+    </svg><div class="igd-tip" id="igd-tip" hidden></div>`;
+    const hit = $("igd-hit"), xh = $("igd-xh"), xd = $("igd-xd"), tip = $("igd-tip");
+    const svg = wrap.firstElementChild;
+    hit.onmousemove = (e) => {
+      const r = svg.getBoundingClientRect();
+      const x = (e.clientX - r.left) * (W / r.width);
+      const t = t0 + (x - ml) / (W - ml - mr) * (t1 - t0);
+      let lo2 = 0, hi2 = pts.length - 1;
+      while (hi2 - lo2 > 1) { const m = (lo2 + hi2) >> 1; if (pts[m][0] < t) lo2 = m; else hi2 = m; }
+      const p = Math.abs(pts[lo2][0] - t) < Math.abs(pts[hi2][0] - t) ? pts[lo2] : pts[hi2];
+      const px = X(p[0]), py = Y(p[1]);
+      xh.setAttribute("x1", px); xh.setAttribute("x2", px); xh.setAttribute("visibility", "visible");
+      xd.setAttribute("cx", px); xd.setAttribute("cy", py); xd.setAttribute("visibility", "visible");
+      tip.hidden = false;
+      tip.innerHTML = `<b>${fmtN(p[1])} takipçi</b>${esc(fmtDate(p[0]))}`;
+      const sx = px * (r.width / W);
+      tip.style.left = Math.min(r.width - tip.offsetWidth - 4, Math.max(0, sx + 10)) + "px";
+      tip.style.top = Math.max(0, py * (r.height / H) - 44) + "px";
+    };
+    hit.onmouseleave = () => { xh.setAttribute("visibility", "hidden"); xd.setAttribute("visibility", "hidden"); tip.hidden = true; };
   }
 
   function updateReportPage() {
     const c = $("igd-rep-body"); if (!c) return;
     const rb = $("igd-rep-run"); if (rb) rb.disabled = isBusy();
-    const r = loadReportLast();
-    const snap = loadReportSnap();
+    const r = S.reportLast;
+    let rep;
     if (!r) {
-      c.innerHTML = emptyCard({ icon: "report", title: "Henüz rapor yok",
+      rep = emptyCard({ icon: "report", title: "Henüz rapor yok",
         html: "<p>İlk rapor temel alınır. <b>Bir sonraki</b> raporda iki tarama arasında <b>gelen ve ayrılan</b> takipçiler isim isim listelenir.</p>",
         actions: [{ label: "Raporu oluştur", cta: "report", primary: true, icon: "report" }],
         note: "Rapor için tüm takipçilerin taranır; başlamadan önce kaç kişi olduğunu ve tahmini süreyi gösteririm." });
-      return;
+    } else if (r.baseline) {
+      rep = emptyCard({ icon: "check", title: "Rapor temeli alındı",
+        html: `<p>${esc(fmtDate(r.t))} · ${S.reportBase ? fmtN(S.reportBase.n) : 0} takipçi.${r.prevIncomplete ? " Önceki temel eksik bir listeye dayandığı için yeni temel alındı." : ""}</p><p>Bundan sonraki raporda gelen/ayrılan farkları çıkacak.</p>` });
+    } else {
+      const section = (title, arr, icon, color) => {
+        if (!arr.length) return `<div class="igd-secbar">${title} (0)</div>` + emptyCard({ compact: true, title: "Yok" });
+        return `<div class="igd-secbar">${title} (${arr.length})</div>` + arr.slice().sort((a, b) => coll.compare(a.username, b.username)).map((u) =>
+          `<div class="igd-item"><div style="width:30px;text-align:center;color:${color};">${ic(icon, 16)}</div>
+            <div class="igd-meta"><div class="igd-name"><a href="https://www.instagram.com/${esc(u.username)}/" target="_blank">@${esc(u.username)}</a></div></div>
+            <div class="igd-actions"><button class="igd-mini icon" data-sb="${esc(u.username)}" aria-label="@${esc(u.username)} SocialBlade" title="SocialBlade">${ic("trend", 14)}</button></div></div>`).join("");
+      };
+      rep = `<div class="igd-bar2"><span>Bu rapor: <b>${esc(fmtDate(r.t))}</b> · önceki: ${r.prevT ? esc(fmtDate(r.prevT)) : "—"}</span>
+          <span class="igd-sp"></span><span><b style="color:var(--igd-ok);">+${r.gained.length}</b> gelen · <b style="color:var(--igd-dtx);">-${r.lost.length}</b> ayrılan</span></div>` +
+        section("Gelen takipçiler", r.gained, "check", "var(--igd-ok)") + section("Ayrılan takipçiler", r.lost, "x", "var(--igd-dtx)");
     }
-    if (r.baseline) {
-      c.innerHTML = emptyCard({ icon: "check", title: "İlk rapor temel alındı",
-        html: `<p>${esc(fmtDate(r.t))} · ${snap ? fmtN(Object.keys(snap.map).length) : 0} takipçi.</p><p>Bundan sonraki raporda gelen/ayrılan farkları çıkacak.</p>` });
-      return;
-    }
-    const section = (title, arr, icon, color) => {
-      if (!arr.length) return `<div class="igd-secbar">${title} (0)</div>` + emptyCard({ compact: true, title: "Yok" });
-      return `<div class="igd-secbar">${title} (${arr.length})</div>` + arr.slice().sort((a, b) => coll.compare(a.username, b.username)).map((u) =>
-        `<div class="igd-item"><div style="width:30px;text-align:center;color:${color};">${ic(icon, 16)}</div>
-          <div class="igd-meta"><div class="igd-name"><a href="https://www.instagram.com/${esc(u.username)}/" target="_blank">@${esc(u.username)}</a></div></div>
-          <div class="igd-actions"><button class="igd-mini icon" data-sb="${esc(u.username)}" aria-label="@${esc(u.username)} SocialBlade" title="SocialBlade">${ic("trend", 14)}</button></div></div>`).join("");
-    };
-    c.innerHTML = `<div class="igd-bar2"><span>Bu rapor: <b>${esc(fmtDate(r.t))}</b> · önceki: ${r.prevT ? esc(fmtDate(r.prevT)) : "—"}</span>
-        <span class="igd-sp"></span><span><b style="color:var(--igd-ok);">+${r.gained.length}</b> gelen · <b style="color:var(--igd-dtx);">-${r.lost.length}</b> ayrılan</span></div>` +
-      section("Gelen takipçiler", r.gained, "check", "var(--igd-ok)") + section("Ayrılan takipçiler", r.lost, "x", "var(--igd-dtx)");
+    const baseNote = S.reportBase && !S.reportBase.complete
+      ? `<div class="igd-bar2 warn">${ic("alert", 14)}<span>Kayıtlı rapor temeli eksik bir takipçi listesine dayanıyor (${fmtN(S.reportBase.n)} hesap). Bir sonraki rapor karşılaştırma yapmadan yeni bir tam temel alacak.</span></div>` : "";
+    c.innerHTML = chartHtml() + baseNote + rep;
+    const wrap = $("igd-chart-wrap");
+    if (wrap) drawChart(wrap, seriesInRange());
+  }
+
+  // ================================================================ İşlem Geçmişi sayfası
+  const UNDO = { unfollow: "follow", follow: "unfollow" };
+  const HIST_FILTERS = [["all", "Tümü"], ["unfollow", "Takibi bırakılanlar"], ["follow", "Takip edilenler"], ["remove", "Takipçiden çıkarılanlar"], ["dm", "DM işlemleri"], ["fail", "Başarısızlar"]];
+  const histKey = (e) => e.t + "|" + e.pk;
+
+  function buildHistoryPage(page) {
+    S.histSel = new Set(); S.histLastIdx = -1;
+    page.innerHTML = `
+      <div class="igd-toolbar">
+        <div class="igd-search">${ic("search")}<input id="igd-h-q" placeholder="Kullanıcı adı ara..." aria-label="Geçmişte kullanıcı adı ara" autocomplete="off" value="${esc(S.histQuery)}"/></div>
+        <select id="igd-h-f" class="igd-sel" aria-label="İşlem türü">${HIST_FILTERS.map(([v, l]) => `<option value="${v}" ${S.histFilter === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <button class="igd-btn" id="igd-h-csv">${ic("download")} CSV</button>
+        <button class="igd-btn primary" id="igd-h-undo" disabled>Seçilenleri geri al (0)</button>
+      </div>
+      <div class="igd-listhead" id="igd-h-head"></div>
+      <div class="igd-list" id="igd-h-list" role="list" aria-label="İşlem geçmişi"></div>`;
+    $("igd-h-q").oninput = (e) => { S.histQuery = e.target.value.trim().toLowerCase(); S.histSel.clear(); render(); };
+    $("igd-h-f").onchange = (e) => { S.histFilter = e.target.value; S.histSel.clear(); render(); };
+    $("igd-h-csv").onclick = exportHistory;
+    $("igd-h-undo").onclick = undoSelected;
+    $("igd-h-list").onclick = onHistClick;
+  }
+
+  function histVisible() {
+    const f = S.histFilter, q = S.histQuery;
+    return S.hist.filter((e) => {
+      if (f === "fail") { if (e.ok) return false; }
+      else if (f === "dm") { if (e.a !== "dmdelete" && e.a !== "unsend") return false; }
+      else if (f !== "all" && e.a !== f) return false;
+      return !q || String(e.u || "").toLowerCase().includes(q);
+    }).reverse(); // en yeni üstte
+  }
+  const undoable = (e) => e.ok && !!UNDO[e.a];
+
+  function histRowHtml(e, i) {
+    const k = histKey(e), sel = S.histSel.has(k), can = undoable(e);
+    const isDm = e.a === "dmdelete" || e.a === "unsend";
+    const name = esc(e.u);
+    const who = isDm ? name : `<a href="https://www.instagram.com/${name}/" target="_blank">@${name}</a>`;
+    return `<div class="igd-item ${sel ? "sel" : ""} ${can ? "" : "nosel"}" data-i="${i}" role="listitem">
+      <input type="checkbox" class="igd-cb" aria-label="${name} işlemini seç" ${sel ? "checked" : ""} ${can ? "" : "disabled"}/>
+      <div style="width:28px;text-align:center;color:${e.ok ? "var(--igd-ok)" : "var(--igd-dtx)"};">${ic(e.ok ? "check" : "x", 16)}</div>
+      <div class="igd-meta">
+        <div class="igd-name">${who}<span class="igd-tag ${e.ok ? "" : "dm never"}">${esc(HIST_LABELS[e.a] || e.a)}${e.ok ? "" : " · başarısız"}</span></div>
+        <div class="igd-full">${esc(fmtDate(e.t))}${e.e ? " · " + esc(e.e) : ""}</div>
+      </div>
+      <div class="igd-actions">${can ? `<button class="igd-mini" data-undo="${i}">${ic("undo", 13)} ${e.a === "unfollow" ? "Yeniden takip et" : "Takibi bırak"}</button>`
+        : e.a === "remove" && e.ok ? `<span class="igd-note">geri alınamaz</span>` : ""}</div>
+    </div>`;
+  }
+
+  function onHistClick(ev) {
+    const t = ev.target;
+    const btn = t.closest("button");
+    if (btn && btn.dataset.undo != null) { const e = S.histVis[+btn.dataset.undo]; if (e) bulkAction(UNDO[e.a], [e.pk], { [e.pk]: e.u }); return; }
+    if (btn || t.closest("a")) return;
+    const row = t.closest(".igd-item[data-i]"); if (!row) return;
+    const i = +row.dataset.i, e = S.histVis[i];
+    if (!e || !undoable(e)) { if (t.matches("input")) ev.preventDefault(); return; }
+    const want = t.matches("input.igd-cb") ? t.checked : !S.histSel.has(histKey(e));
+    if (ev.shiftKey && S.histLastIdx >= 0) {
+      const lo = Math.min(S.histLastIdx, i), hi = Math.max(S.histLastIdx, i);
+      for (let k = lo; k <= hi; k++) { const x = S.histVis[k]; if (undoable(x)) { if (want) S.histSel.add(histKey(x)); else S.histSel.delete(histKey(x)); } }
+      try { window.getSelection().removeAllRanges(); } catch (err) {}
+    } else if (want) S.histSel.add(histKey(e)); else S.histSel.delete(histKey(e));
+    S.histLastIdx = i;
+    drawVList($("igd-h-list"), true);
+    renderHistHead();
+  }
+
+  function renderHistHead() {
+    const el = $("igd-h-head"); if (!el) return;
+    const used = dailyUsed(S.hist).length, lim = dailyLimit();
+    const n = S.histSel.size;
+    const ub = $("igd-h-undo");
+    if (ub) { ub.disabled = n === 0 || isBusy(); ub.textContent = `Seçilenleri geri al (${n})`; }
+    el.innerHTML = `<div class="igd-bar2">${ic("clock", 14)}<span>Son 24 saatte <b>${used}</b> takip işlemi${lim ? ` · günlük sınır ${lim} · kalan <b>${Math.max(0, lim - used)}</b>` : " · günlük sınır kapalı"}</span>
+      <span class="igd-sp"></span><span class="igd-note">Takibi bırakılanlar yeniden takip edilebilir; takipçiden çıkarılanlar geri alınamaz.</span></div>
+      ${S.histVis.length ? `<div class="igd-selbar"><span>${fmtN(S.histVis.length)} kayıt${n ? ` · <b>${n} seçili</b>` : ""}</span><span class="igd-sp"></span><span class="igd-note">Satıra tıkla: seç · Shift+tık: aralık seç</span></div>` : ""}`;
+  }
+
+  function updateHistoryPage() {
+    S.histVis = histVisible();
+    renderHistHead();
+    const box = $("igd-h-list");
+    if (!S.hist.length) setListContent(box, emptyCard({ icon: "clock", title: "Henüz işlem yok", html: "<p>Takibi bırakma, takip etme, takipçiden çıkarma ve DM işlemlerin burada tarihiyle listelenir; takibi bıraktıklarını buradan yeniden takip edebilirsin.</p>" }));
+    else if (!S.histVis.length) setListContent(box, emptyCard({ compact: true, icon: "search", title: "Eşleşen kayıt yok" }));
+    else mountVList(box, S.histVis, histRowHtml);
+  }
+
+  async function undoSelected() {
+    const sel = S.histVis.filter((e) => S.histSel.has(histKey(e)));
+    if (!sel.length) return;
+    const kinds = new Set(sel.map((e) => e.a));
+    if (kinds.size > 1) { toast("Seçimde farklı işlem türleri var — önce üstteki süzgeçten tek bir türü seç.", true); return; }
+    const a = UNDO[sel[0].a];
+    const names = {}; sel.forEach((e) => { names[e.pk] = e.u; });
+    const pks = [...new Set(sel.map((e) => e.pk))];
+    S.histSel.clear();
+    await bulkAction(a, pks, names);
+  }
+
+  function exportHistory() {
+    const list = S.histVis && S.histVis.length ? S.histVis : histVisible();
+    if (!list.length) { toast("Dışa aktarılacak kayıt yok.", true); return; }
+    const rows = list.map((e) => [fmtDate(e.t), HIST_LABELS[e.a] || e.a, e.u, e.ok ? "başarılı" : "başarısız", e.e || ""]);
+    const name = `instagram-islem-gecmisi-${stampNow()}.csv`;
+    saveTextFile(name, toCSV(["tarih", "islem", "hesap", "sonuc", "hata"], rows), "İşlem geçmişi dışa aktarıldı", `${list.length} kayıt Downloads/${name} dosyasına kaydedildi ✓`);
   }
 
   // ================================================================ Ayarlar sayfası
   const PRIVACY_HTML = `<ul>
     <li><b>Şifreni görmez.</b> Giriş, Instagram'ın kendi gerçek sayfasında yapılır; bu uygulama yalnızca o sayfayı gösteren bir penceredir. Şifren uygulamaya yazılmaz, hiçbir yerde saklanmaz.</li>
     <li><b>Her şey bu Mac'te kalır.</b> Uygulamanın sunucusu yoktur; hiçbir bilgin internete ya da başka birine gönderilmez. Analizler kendi oturumunda, cihazında çalışır.</li>
-    <li><b>Ne okur:</b> takip/takipçi listelerini Instagram'ın kendi arayüzünden çeker. DM bölümünde sohbet <b>listesini</b> ve tarihleri görür; mesaj içeriklerini okumaz — yalnızca sen “yedekle” dersen <b>kendi gönderdiğin</b> mesajların metnini Downloads klasörüne kaydeder.</li>
-    <li><b>İşlemler senin komutunla:</b> takibi bırakma, takipçiden çıkarma, DM silme ve mesaj geri çekme yalnızca sen onayladığında ve kendi hesabınla yapılır.</li>
-    <li><b>Sorumluluk sende:</b> araç Instagram'ın resmi olmayan uçlarını kullanır. Aşırı ya da hızlı kullanım hesabına geçici kısıtlama getirebilir (bu yüzden aralarda otomatik beklemeler var).</li>
+    <li><b>Ne okur:</b> takip/takipçi listelerini ve (istersen) son gönderilerini beğenenleri Instagram'ın kendi arayüzünden çeker. DM bölümünde sohbet <b>listesini</b> ve tarihleri görür; mesaj içeriklerini okumaz — yalnızca sen “yedekle” dersen <b>kendi gönderdiğin</b> mesajların metnini Downloads klasörüne kaydeder.</li>
+    <li><b>İşlemler senin komutunla:</b> takibi bırakma, takipçiden çıkarma, DM silme ve mesaj geri çekme yalnızca sen onayladığında ve kendi hesabınla yapılır; günlük sınır ve art arda hata durdurması hesabını korur.</li>
+    <li><b>Sorumluluk sende:</b> araç Instagram'ın resmi olmayan uçlarını kullanır. Aşırı ya da hızlı kullanım hesabına geçici kısıtlama getirebilir.</li>
   </ul>`;
 
   function buildSettingsPage(page) {
     page.innerHTML = `<div class="igd-scroll"><div class="igd-settings">
+      <section class="igd-panel" aria-labelledby="igd-set-l">
+        <h2 id="igd-set-l">${ic("shield")} Güvenlik sınırları</h2>
+        <p class="igd-note">Instagram kesin sınırı açıklamaz; çok sayıda takip işlemi aynı gün hesabı geçici olarak kısıtlatabilir. Sınır dolunca kuyruk bekler ve hak açılınca (uygulama açıksa) kendiliğinden sürer. Instagram art arda reddederse işlem her durumda durur.</p>
+        <div class="row"><label class="igd-chk">24 saatte en fazla <input type="number" id="igd-lim" min="0" max="1000" class="igd-num"/> takip işlemi (0 = sınırsız)</label>
+          <button class="igd-btn" id="igd-lim-save">Kaydet</button><span class="igd-note" id="igd-lim-info"></span></div>
+      </section>
       <section class="igd-panel" aria-labelledby="igd-set-n">
         <h2 id="igd-set-n">${ic("bell")} Takipçi bildirimleri</h2>
         <div class="igd-nform">
           <label class="igd-chk"><input type="checkbox" id="ign-en"/> Beni takibi bırakanlar için bildirim gönder (arka planda)</label>
           <label class="igd-chk"><input type="checkbox" id="ign-new"/> Yeni takipçiler için de bildirim gönder</label>
           <label class="igd-chk"><input type="checkbox" id="ign-deep"/> Düşüş olunca <b>kimin</b> ayrıldığını da otomatik bul (ağır tarama — en fazla 3 saatte bir)</label>
+          <label class="igd-chk"><input type="checkbox" id="ign-series"/> Takipçi sayısını grafik için kaydet (Rapor sayfası)</label>
           <label class="igd-chk">Kontrol aralığı <input type="number" id="ign-int" min="10" max="720" class="igd-num"/> dakika</label>
           <div class="igd-note" id="ign-info"></div>
         </div>
         <div class="row"><button class="igd-btn primary" id="ign-save">Kaydet</button><button class="igd-btn" id="ign-check">${ic("refresh")} Şimdi kontrol et</button></div>
+      </section>
+      <section class="igd-panel" aria-labelledby="igd-set-g">
+        <h2 id="igd-set-g">${ic("heart")} Hayalet takipçiler</h2>
+        <div class="row"><label class="igd-chk">Son <input type="number" id="igd-gp" min="3" max="30" class="igd-num"/> gönderinin beğenileri taransın</label>
+          <button class="igd-btn" id="igd-gp-save">Kaydet</button></div>
+        <p class="igd-note" style="margin-top:8px;">Daha çok gönderi daha doğru sonuç verir ama gönderi başına bir istek daha yapar.</p>
       </section>
       <section class="igd-panel" aria-labelledby="igd-set-a">
         <h2 id="igd-set-a">${ic("sun")} Görünüm</h2>
@@ -265,6 +466,12 @@
       <section class="igd-panel" aria-labelledby="igd-set-w">
         <h2 id="igd-set-w">${ic("shield")} Koru listesi</h2>
         <div id="igd-wlinfo"></div>
+      </section>
+      <section class="igd-panel" aria-labelledby="igd-set-b">
+        <h2 id="igd-set-b">${ic("download")} Yedekle ve geri yükle</h2>
+        <p class="igd-note">Ayarların, koru listen, profil izleme listen, işlem geçmişin, raporların ve grafik verin tek bir JSON dosyasına kaydedilir (Downloads). Başka bir Mac'e taşımak ya da sıfırdan kurulumdan sonra geri yüklemek için kullanabilirsin.</p>
+        <div class="row"><label class="igd-chk"><input type="checkbox" id="igd-bk-scans"/> Tarama sonuçlarını da ekle (dosya büyür)</label></div>
+        <div class="row"><button class="igd-btn primary" id="igd-bk-save">${ic("download")} Yedeği kaydet</button><button class="igd-btn" id="igd-bk-load">${ic("upload")} Yedekten geri yükle…</button></div>
       </section>
       <section class="igd-panel" aria-labelledby="igd-set-d">
         <h2 id="igd-set-d">${ic("alert")} Veriler</h2>
@@ -278,9 +485,18 @@
       </section>
     </div></div>`;
     const W = () => window.__igdWatch;
+    $("igd-lim").value = dailyLimit();
+    $("igd-lim-save").onclick = () => {
+      const v = Math.max(0, Math.min(1000, parseInt($("igd-lim").value || "0", 10) || 0));
+      $("igd-lim").value = v; lsSet("igd_daily_limit", String(v));
+      toast(v ? `Günlük sınır ${v} işlem yapıldı.` : "Günlük sınır kapatıldı.");
+      if (S.queue && S.queue.state === "wait") { S.queue.resumeAt = nextSlotAt(); saveQueue(); scheduleQueue(); }
+      render();
+    };
     $("ign-en").checked = lsGet("igd_watch_enabled", "0") === "1";
     $("ign-new").checked = lsGet("igd_watch_newfollowers", "0") === "1";
     $("ign-deep").checked = lsGet("igd_watch_deep", "0") === "1";
+    $("ign-series").checked = lsGet("igd_series_on", "1") !== "0";
     $("ign-int").value = parseInt(lsGet("igd_watch_interval", "30"), 10);
     $("ign-check").onclick = () => { if (W()) { W().checkNow(); toast("Kontrol başlatıldı..."); setTimeout(render, 4000); } else toast("İzleyici hazır değil, sayfayı yenileyin.", true); };
     $("ign-save").onclick = () => {
@@ -288,14 +504,23 @@
       $("ign-int").value = iv;
       lsSet("igd_watch_newfollowers", $("ign-new").checked ? "1" : "0");
       lsSet("igd_watch_deep", $("ign-deep").checked ? "1" : "0");
+      lsSet("igd_series_on", $("ign-series").checked ? "1" : "0");
       lsSet("igd_watch_interval", String(iv));
       if (!W()) { toast("İzleyici hazır değil, sayfayı yenileyin.", true); return; }
       if ($("ign-en").checked) { W().start(); toast("Bildirimler açıldı ✓ (ilk kontrol temel alınır)"); }
-      else { W().stop(); toast("Bildirimler kapatıldı."); }
+      else { W().stop(); toast("Ayarlar kaydedildi; bildirimler kapalı."); }
+      W().ensureTimer(); if (W().stopTimerIfIdle) W().stopTimerIfIdle();
       render();
+    };
+    $("igd-gp").value = ghostPosts();
+    $("igd-gp-save").onclick = () => {
+      const v = Math.max(3, Math.min(30, parseInt($("igd-gp").value || "12", 10) || 12));
+      $("igd-gp").value = v; lsSet("igd_ghost_posts", String(v)); toast(`Hayalet taraması son ${v} gönderiyi kullanacak.`);
     };
     $("igd-th-dark").onclick = () => setTheme(false);
     $("igd-th-light").onclick = () => setTheme(true);
+    $("igd-bk-save").onclick = () => saveBackup($("igd-bk-scans").checked);
+    $("igd-bk-load").onclick = pickRestore;
     $("igd-clear").onclick = clearAll;
     $("igd-onb-again").onclick = () => openOnboarding(1);
   }
@@ -305,17 +530,22 @@
     const last = W ? W.lastCheck() : 0, cnt = W ? W.count() : 0;
     const info = $("ign-info");
     if (info) info.innerHTML = `Durum: <b>${W && W.isOn() ? "açık" : "kapalı"}</b> · son kontrol: ${last ? esc(fmtDate(last)) : "henüz yok"} · son bilinen takipçi sayısı: ${cnt ? fmtN(cnt) : "—"}<br>
-      Arka planda yalnızca <b>takipçi sayına</b> bakılır (tek küçük istek), tüm liste taranmaz — 30.000 takipçide bile Instagram'ı yormaz. Sayı düşünce net kaç kişi olduğu bildirilir; isimler için Takipçiler sayfasından tara.
+      Arka planda yalnızca <b>takipçi sayına</b> bakılır (tek küçük istek), tüm liste taranmaz. Sayı düşünce net kaç kişi olduğu bildirilir; isimler için Takipçiler sayfasından tara.
       İzleyicinin çalışması için uygulama açık ya da menü çubuğunda kalmalı.`;
+    const li = $("igd-lim-info");
+    if (li) { const used = dailyUsed(S.hist).length; li.textContent = `Son 24 saatte ${used} işlem yapıldı.`; }
     const dk = $("igd-th-dark"), lt = $("igd-th-light");
     if (dk) { dk.classList.toggle("on", !isLight()); dk.setAttribute("aria-pressed", String(!isLight())); lt.classList.toggle("on", isLight()); lt.setAttribute("aria-pressed", String(isLight())); }
     const wl = $("igd-wlinfo");
     if (wl) {
       const known = [...S.whitelist].map((pk) => findUser(pk)).filter(Boolean);
+      const sug = protectSuggestions();
       wl.innerHTML = `<p class="igd-note">Korunan hesaplar toplu “Takibi bırak” işlemlerinde atlanır ve seçilemez. Listedeki ${ic("shield", 12)} düğmesiyle eklenir.</p>
         <div class="row"><span><b>${fmtN(S.whitelist.size)}</b> hesap korunuyor.</span>
+          ${sug.length ? `<button class="igd-btn sm" id="igd-wlsug">Son 90 günde DM'leştiğin ${sug.length} kişiyi koru…</button>` : S.dmScanned ? "" : `<span class="igd-note">DM kutusunu tararsan yakın arkadaşlarını korumaya önerebilirim.</span>`}
           ${S.whitelist.size ? `<button class="igd-btn sm danger" id="igd-wlclear">Tüm korumaları kaldır…</button>` : ""}</div>
         ${known.length ? `<div class="igd-chips" style="margin-top:10px;">${known.slice(0, 100).map((u) => `<span class="igd-tag wl" style="font-size:12px;padding:2px 8px;">@${esc(u.username)}</span>`).join("")}</div>` : ""}`;
+      const sb_ = $("igd-wlsug"); if (sb_) sb_.onclick = protectSuggested;
       const b = $("igd-wlclear");
       if (b) b.onclick = async () => {
         const ok = await askConfirm({ title: "Tüm korumalar kaldırılsın mı?", html: `<p>${fmtN(S.whitelist.size)} hesabın koruması kalkar; toplu “Takibi bırak” işlemlerinde seçilebilir hâle gelirler.</p>`, danger: true, okLabel: "Korumaları kaldır" });
@@ -323,6 +553,55 @@
         S.whitelist.clear(); saveWhitelist(); render(); toast("Korumalar kaldırıldı.");
       };
     }
+  }
+
+  // --- Yedekle / geri yükle ---
+  // Kuyruk yedeğe girmez: eski bir yedek, iptal edilmiş bir toplu işlemi geri getirip çalıştırmasın.
+  const BACKUP_IDB_KEYS = [K.history, K.series, K.snapReport, K.reportLast, K.snapFollowers];
+  const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+  const BACKUP_SHAPES = {
+    [K.history]: (v) => Array.isArray(v) && v.every((e) => isObj(e) && typeof e.t === "number" && typeof e.a === "string"),
+    [K.series]: (v) => Array.isArray(v) && v.every((p) => Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number"),
+    [K.snapReport]: (v) => isObj(v) && isObj(v.map),
+    [K.reportLast]: (v) => isObj(v) && Array.isArray(v.gained || []) && Array.isArray(v.lost || []),
+    [K.snapFollowers]: (v) => isObj(v) && isObj(v.map),
+    [K.cache]: (v) => isObj(v) && Array.isArray(v.following),
+    [K.likes]: (v) => isObj(v) && Array.isArray(v.likers),
+  };
+  async function saveBackup(includeScans) {
+    const ls = {};
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("igd_")) ls[k] = localStorage.getItem(k); }
+    const idb = {};
+    for (const k of BACKUP_IDB_KEYS.concat(includeScans ? [K.cache, K.likes] : [])) {
+      try { const v = await DB.get(k); if (v !== undefined) idb[k] = v; } catch (e) {}
+    }
+    const name = `instagram-denetim-yedek-${stampNow()}.json`;
+    saveTextFile(name, JSON.stringify({ app: "instadenetim", v: 1, t: Date.now(), ls, idb }), "Yedek kaydedildi", `Yedek Downloads/${name} dosyasına kaydedildi ✓`);
+  }
+  function pickRestore() {
+    if (guardBusy()) return;
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = ".json,application/json";
+    inp.onchange = async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      let d;
+      try { d = JSON.parse(await f.text()); } catch (e) { toast("Dosya okunamadı (geçerli bir JSON değil).", true); return; }
+      if (!d || d.app !== "instadenetim" || typeof d.ls !== "object") { toast("Bu dosya bir Instagram Takip Denetimi yedeği değil.", true); return; }
+      const idbKeys = Object.keys(isObj(d.idb) ? d.idb : {}).filter((k) => BACKUP_SHAPES[k] && BACKUP_SHAPES[k](d.idb[k]));
+      const h = (d.idb || {})[K.history];
+      const ok = await askConfirm({
+        title: "Yedek geri yüklensin mi?",
+        html: `<p><b>${esc(fmtDate(d.t))}</b> tarihli yedek: ${Object.keys(d.ls).length} ayar${Array.isArray(h) ? `, ${fmtN(h.length)} geçmiş kaydı` : ""}${(d.idb || {})[K.cache] ? ", tarama sonuçları" : ""}.</p>
+          <p>Bu Mac'teki aynı ayarlar ve kayıtlar yedektekilerle <b>değiştirilir</b>. Panel ardından yeniden yüklenir.</p>`,
+        danger: true, okLabel: "Geri yükle",
+      });
+      if (!ok || guardBusy()) return;
+      Object.keys(d.ls).forEach((k) => { if (k.startsWith("igd_") && typeof d.ls[k] === "string") lsSet(k, d.ls[k]); });
+      for (const k of idbKeys) { try { await DB.set(k, d.idb[k]); } catch (e) {} }
+      toast("Yedek geri yüklendi ✓ — panel yeniden yükleniyor…");
+      setTimeout(() => location.reload(), 1200);
+    };
+    inp.click();
   }
 
   // ================================================================ Tanıtım (ilk açılış)
@@ -394,11 +673,12 @@
   // ================================================================ çerçeve: kenar çubuğu + sayfalar
   const PAGES = {
     analysis:  { label: "Analiz",        icon: "analysis", title: "Analiz",        sub: "Takip ettiklerin: kim geri takip ediyor, kimle etkileşimin yok", build: buildListPage,     update: updateListPage },
-    followers: { label: "Takipçiler",    icon: "users",    title: "Takipçiler",    sub: "Seni takip edenler: hayranların ve şüpheli hesaplar",             build: buildListPage,     update: updateListPage },
+    followers: { label: "Takipçiler",    icon: "users",    title: "Takipçiler",    sub: "Seni takip edenler: hayranların, şüpheli hesaplar ve hayaletler", build: buildListPage,     update: updateListPage },
     dm:        { label: "DM'lerim",      icon: "message",  title: "DM'lerim",      sub: "Sohbetlerini yönet: topluca sil, gönderdiğin mesajları geri çek", build: buildDMPage,       update: updateDMPage },
     profile:   { label: "Profil İzleme", icon: "eye",      title: "Profil İzleme", sub: "Başka bir hesabın takip ettikleri ve takip/bırakma bildirimleri", build: buildProfilePage,  update: updateProfilePage },
-    report:    { label: "Rapor",         icon: "report",   title: "Takipçi raporu", sub: "İki tarama arasında gelen ve ayrılan takipçiler",                build: buildReportPage,   update: updateReportPage },
-    settings:  { label: "Ayarlar",       icon: "settings", title: "Ayarlar",       sub: "Bildirimler, görünüm, koru listesi ve gizlilik",                 build: buildSettingsPage, update: updateSettingsPage },
+    report:    { label: "Rapor",         icon: "report",   title: "Takipçi raporu", sub: "Takipçi grafiğin; iki tarama arasında gelen ve ayrılan takipçiler", build: buildReportPage, update: updateReportPage },
+    history:   { label: "İşlem Geçmişi", icon: "clock",    title: "İşlem Geçmişi", sub: "Yaptığın işlemler tarihiyle — takibi bıraktıklarını geri al",     build: buildHistoryPage,  update: updateHistoryPage },
+    settings:  { label: "Ayarlar",       icon: "settings", title: "Ayarlar",       sub: "Güvenlik sınırları, bildirimler, koru listesi, yedek ve gizlilik", build: buildSettingsPage, update: updateSettingsPage },
   };
 
   const SHELL = `
@@ -524,13 +804,35 @@
     applyTheme();
   }
 
-  function boot() {
-    const hadCache = loadCache();
+  // Kayıtlı veriyi IndexedDB'den yükle (eski localStorage kayıtları bir kez buraya taşınır)
+  async function loadAll() {
+    await migrateStorage();
+    const hadCache = await loadCache();
+    const [hist, series, likes, resume] = await Promise.all([
+      histLoad().catch(() => []), DB.get(K.series).catch(() => null), DB.get(K.likes).catch(() => null), DB.get(K.resumeFollowers).catch(() => null),
+    ]);
+    S.hist = hist || [];
+    S.series = series || [];
+    if (likes && Array.isArray(likes.likers)) S.likes = Object.assign({}, likes, { likers: new Set(likes.likers) });
+    S.resume = resume || null;
+    await loadReportState();
+    await loadQueue();
+    return hadCache;
+  }
+
+  async function boot() {
     const sec = lsGet("igd_section", "analysis");
     S.section = PAGES[sec] ? sec : "analysis";
     if (S.section === "analysis" || S.section === "followers") S.cat = S.catBySec[S.section];
-    if (hadCache) S.statusText = "Önceki tarama yüklendi · her veri kaynağının ne zaman alındığı yukarıda yazıyor.";
+    S.chartRange = parseInt(lsGet("igd_chart_range", "30"), 10) || 0;
+    if (!RANGES.some(([d]) => d === S.chartRange)) S.chartRange = 30;
+    S.statusText = "Kayıtlı sonuçlar yükleniyor…";
     ensureUI();
+    let hadCache = false;
+    try { hadCache = await loadAll(); } catch (e) { toast("Kayıtlı sonuçlar okunamadı: " + (e && e.message || e), true); }
+    S.loaded = true;
+    S.statusText = hadCache ? "Önceki tarama yüklendi · her veri kaynağının ne zaman alındığı yukarıda yazıyor." : "Hazır.";
+    if (S.queue) S.statusText = "Kuyrukta bekleyen bir toplu işlem var — alttaki tepsiden devam ettirebilirsin.";
     // Var olan kullanıcı tanıtımı görmesin; ilk kez açanlar görsün
     if (hadCache) lsSet(ONB_KEY, "1");
     if (getView() === "ig") showInstagram(); else showPanel();

@@ -118,42 +118,55 @@
     render();
   }
 
-  // ================================================================ Rapor: veri
-  const loadReportLast = () => lsJSON("igd_report_last", null);
-  const loadReportSnap = () => lsJSON("igd_report_snap", null);
-  const saveReportSnap = (o) => lsSet("igd_report_snap", JSON.stringify(o));
-  const saveReportLast = (o) => lsSet("igd_report_last", JSON.stringify(o));
+  // ================================================================ Rapor: veri (IndexedDB)
+  // Rapor yalnızca TAM takipçi listeleriyle karşılaştırma yapar; eksik liste sahte "gelen/ayrılan" üretirdi.
+  async function loadReportState() {
+    try {
+      S.reportLast = (await DB.get(K.reportLast)) || null;
+      const snap = await DB.get(K.snapReport);
+      S.reportBase = snap ? { t: snap.t, n: Object.keys(snap.map || {}).length, complete: snap.complete !== false } : null;
+    } catch (e) {}
+  }
 
   async function generateReport() {
     if (guardBusy()) return;
-    // Taze tam takipçi listesi varsa (30 dk'dan yeni) onu kullan; yoksa açıkça sorup tara.
+    // Taze (30 dk) ve TAM takipçi listesi varsa onu kullan; yoksa açıkça sorup tara.
     const fresh = S.followersFull && S.followers.length && S.followersScanTime && (Date.now() - S.followersScanTime < 30 * 60000);
     if (!fresh) {
       const n = S.followerCount;
       const ok = await askConfirm({
         title: "Rapor için takipçiler taranacak",
         html: `<p>Rapor, takipçi listenin <b>tamamını</b> bir önceki raporla karşılaştırır. Bunun için ${n ? `<b>${fmtN(n)}</b> takipçinin` : "tüm takipçilerin"} yeniden taranması gerekiyor.</p>
-          <p class="igd-note">Tarama alttaki tepside sürer; durdurursan rapor oluşturulmaz.</p>`,
+          <p class="igd-note">Tarama alttaki tepside sürer. Durdurursan ya da Instagram listeyi eksik verirse rapor oluşturulmaz.</p>`,
         estimate: n ? Math.ceil(n / 100) * 2.6 : 0, // sayfa başına ~0,9 sn bekleme + istek + her 6 sayfada 7 sn mola
         okLabel: "Tara ve raporu oluştur",
       });
       if (!ok) return;
+      const t0 = Date.now();
       await fetchAllFollowers();
+      if (!(S.followersScanTime >= t0)) { toast("Takipçi taraması başlamadı ya da tamamlanmadı; rapor oluşturulmadı.", true); return; }
     }
-    if (!S.followersFull || !S.followers.length) { toast("Takipçi taraması tamamlanmadığı için rapor oluşturulamadı.", true); return; }
-
+    if (!S.followersFull || !S.followers.length) {
+      toast(S.followersTrunc
+        ? `Instagram takipçi listeni eksik verdi (${fmtN(S.followers.length)} / ${fmtN(S.followerCount)}); eksik listeyle rapor yanlış “ayrılan” göstereceği için oluşturulmadı.`
+        : "Takipçi taraması tamamlanmadığı için rapor oluşturulamadı.", true);
+      return;
+    }
     const curMap = {}; S.followers.forEach((u) => { curMap[String(u.pk)] = u.username; });
-    const prev = loadReportSnap();
+    const prev = await DB.get(K.snapReport);
     const now = Date.now();
-    saveReportSnap({ t: now, map: curMap });
-    if (!prev || !prev.map) {
-      saveReportLast({ t: now, prevT: 0, gained: [], lost: [], baseline: true });
+    await DB.set(K.snapReport, { t: now, complete: true, map: curMap });
+    let rep;
+    if (!prev || !prev.map || prev.complete === false) {
+      rep = { t: now, prevT: 0, gained: [], lost: [], baseline: true, prevIncomplete: !!(prev && prev.complete === false) };
     } else {
       const gained = [], lost = [];
       for (const pk in curMap) if (!(pk in prev.map)) gained.push({ pk, username: curMap[pk] });
       for (const pk in prev.map) if (!(pk in curMap)) lost.push({ pk, username: prev.map[pk] });
-      saveReportLast({ t: now, prevT: prev.t, gained, lost });
+      rep = { t: now, prevT: prev.t, gained, lost };
     }
+    await DB.set(K.reportLast, rep);
+    await loadReportState();
     toast("Rapor hazır ✓");
     render();
   }

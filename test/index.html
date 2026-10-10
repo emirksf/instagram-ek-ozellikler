@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="tr">
+<head><meta charset="utf-8"><title>InstaDenetim test</title></head>
+<body style="margin:0;font-family:sans-serif">
+<div style="padding:40px">Sahte Instagram sayfası (panel gizliyken görünür). Gerçek Instagram'a hiçbir istek gitmez.</div>
+<script>
+// ---- Sahte Instagram API'si (test/serve.sh ile sunulur; adres parametreleri test/serve.sh'de) ----
+const P = new URLSearchParams(location.search);
+window.SPEED = parseFloat(P.get("speed") || "0.01");
+const _st = window.setTimeout.bind(window);
+window.setTimeout = (f, ms, ...a) => _st(f, (ms || 0) * window.SPEED, ...a);
+if (P.get("fresh") === "1") {
+  localStorage.clear(); sessionStorage.clear();
+  indexedDB.deleteDatabase("igd");
+}
+if (P.get("login") !== "0") { document.cookie = "ds_user_id=42; path=/"; document.cookie = "csrftoken=abc; path=/"; }
+else { document.cookie = "ds_user_id=; Max-Age=0; path=/"; }
+
+const mk = (i, extra) => Object.assign({ pk: String(1000 + i), username: "kullanici_" + i, full_name: "Test Kişi " + i, profile_pic_url: "", is_verified: i % 7 === 0, is_private: i % 3 === 0 }, extra || {});
+const NF = parseInt(P.get("nf") || "300", 10);
+const FOLLOWING = Array.from({ length: 120 }, (_, i) => mk(i));
+const FOLLOWERS = [...FOLLOWING.slice(0, 50), ...Array.from({ length: NF }, (_, i) => mk(5000 + i, i % 9 === 0 ? { username: "xk" + (90000 + i) + "qz", full_name: "", has_anonymous_profile_picture: true } : {}))];
+const SERVED_FOLLOWERS = P.get("trunc") === "1" ? FOLLOWERS.slice(0, Math.floor(FOLLOWERS.length * 0.4)) : FOLLOWERS;
+const THREADS = Array.from({ length: 45 }, (_, i) => ({ thread_id: "t" + i, users: [{ pk: 1000 + i, username: "kullanici_" + i, profile_pic_url: "" }], last_activity_at: (Date.now() - i * 9 * 86400000) * 1000 }));
+const POSTS = Array.from({ length: 12 }, (_, i) => ({ pk: String(777000 + i), id: `${777000 + i}_42`, like_count: 40 }));
+window.CALLS = [];
+const json = (o, st) => Promise.resolve(new Response(JSON.stringify(o), { status: st || 200, headers: { "content-type": "application/json" } }));
+window.fetch = (url, opts) => {
+  url = String(url); window.CALLS.push((opts && opts.method || "GET") + " " + url.replace("https://www.instagram.com/api/v1", ""));
+  const page = (arr) => { const m = url.match(/max_id=(\d+)/); const off = m ? +m[1] : 0; return json({ users: arr.slice(off, off + 100), next_max_id: off + 100 < arr.length ? String(off + 100) : null }); };
+  if (/friendships\/42\/following/.test(url)) return page(FOLLOWING);
+  if (/friendships\/42\/followers/.test(url)) return page(SERVED_FOLLOWERS);
+  if (/show_many/.test(url)) { const ids = decodeURIComponent(opts.body).replace("user_ids=", "").split(","); const r = {}; ids.forEach((id) => r[id] = { followed_by: +id < 1050 }); return json({ friendship_statuses: r }); }
+  if (/users\/42\/info/.test(url)) return json({ user: { follower_count: FOLLOWERS.length, following_count: FOLLOWING.length } });
+  if (/users\/\d+\/info/.test(url)) return json({ user: { media_count: 0, follower_count: 3, following_count: 2000 } });
+  if (/feed\/user\/42/.test(url)) return json({ items: POSTS });
+  if (/media\/.+\/likers/.test(url)) return json({ users: FOLLOWERS.slice(0, 40).map((u) => ({ pk: u.pk, username: u.username })) });
+  if (/direct_v2\/inbox/.test(url)) { const m = url.match(/cursor=(\d+)/); const off = m ? +m[1] : 0; return json({ inbox: { threads: THREADS.slice(off, off + 20), oldest_cursor: String(off + 20), has_older: off + 20 < THREADS.length } }); }
+  if (/friendships\/(destroy|create|remove_follower)/.test(url)) return P.get("fail") ? json({ status: "fail", feedback_required: true, feedback_title: "Try Again Later" }, 400) : json({ status: "ok" });
+  if (/hide/.test(url)) return json({ status: "ok" });
+  return json({}, 404);
+};
+</script>
+<script src="watcher.js"></script>
+<script src="inject.js"></script>
+</body>
+</html>
