@@ -1,0 +1,7 @@
+# Derleme çıktıları (build.sh üretir)
+*.app/
+AppIcon.iconset/
+AppIcon.icns
+/inject.js
+/watcher.js
+.DS_Store
