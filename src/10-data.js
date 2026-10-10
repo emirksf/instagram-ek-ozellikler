@@ -326,7 +326,11 @@
       let res;
       try { res = await api(url); } catch (e) { await sleep(2000); continue; }
       if (res.status === 429) { onProgress && onProgress(pages, threads.length, "limit — 30 sn"); await sleep(30000); continue; }
-      if (!res.ok) { if (pages === 0) throw new Error("DM kutusu okunamadı (HTTP " + res.status + ")"); break; }
+      if (!res.ok) {
+        if (pages === 0 && res.status === 404) { markDmGone(); throw new Error(DM_GONE_MSG); }
+        if (pages === 0) throw new Error("DM kutusu okunamadı (HTTP " + res.status + ")");
+        break;
+      }
       let d; try { d = await res.json(); } catch (e) { break; }
       const inbox = d.inbox || {};
       (inbox.threads || []).forEach((t) => {

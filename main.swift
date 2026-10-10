@@ -27,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         config.websiteDataStore = .default() // kalıcı oturum
         let ucc = WKUserContentController()
         ucc.add(self, name: "igd")
+        // DM uyumluluk tanılaması: yalnızca kullanıcı başlattığında etkin; Instagram'ın ilk isteklerini görmek için sayfa başında
+        if let cap = loadResource("dmcapture", "js") {
+            ucc.addUserScript(WKUserScript(source: cap, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
         if let watcher = loadResource("watcher", "js") {
             ucc.addUserScript(WKUserScript(source: watcher, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         }

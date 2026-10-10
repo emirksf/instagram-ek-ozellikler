@@ -22,7 +22,8 @@ echo "==> Betikler birleştiriliyor (src/ + shared/ → inject.js, watcher/ + sh
 HDR="// OTOMATİK ÜRETİLİR — düzenleme için src/, shared/ ve watcher/ altındaki dosyaları değiştir, sonra ./build.sh çalıştır."
 { echo "$HDR"; cat src/00-head.js shared/*.js; ls src/*.js | grep -v '/00-head.js$' | xargs cat; } > inject.js
 { echo "$HDR"; cat watcher/00-head.js shared/*.js; ls watcher/*.js | grep -v '/00-head.js$' | xargs cat; } > watcher.js
-if command -v node >/dev/null 2>&1; then node --check inject.js && node --check watcher.js; fi
+{ echo "$HDR"; cat capture/*.js; } > dmcapture.js
+if command -v node >/dev/null 2>&1; then node --check inject.js && node --check watcher.js && node --check dmcapture.js; fi
 
 echo "==> Swift derleniyor..."
 swiftc main.swift -O -target arm64-apple-macosx13.0 \
@@ -31,6 +32,7 @@ swiftc main.swift -O -target arm64-apple-macosx13.0 \
 echo "==> Kaynaklar kopyalanıyor..."
 cp inject.js "$APP/Contents/Resources/inject.js"
 cp watcher.js "$APP/Contents/Resources/watcher.js"
+cp dmcapture.js "$APP/Contents/Resources/dmcapture.js"
 cp Info.plist "$APP/Contents/Info.plist"
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 

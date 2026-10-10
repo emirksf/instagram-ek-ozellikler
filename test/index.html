@@ -35,11 +35,18 @@ window.fetch = (url, opts) => {
   if (/users\/\d+\/info/.test(url)) return json({ user: { media_count: 0, follower_count: 3, following_count: 2000 } });
   if (/feed\/user\/42/.test(url)) return json({ items: POSTS });
   if (/media\/.+\/likers/.test(url)) return json({ users: FOLLOWERS.slice(0, 40).map((u) => ({ pk: u.pk, username: u.username })) });
+  if (P.get("dmgone") === "1" && /direct_v2/.test(url)) return Promise.resolve(new Response("<html>Sayfa bulunamadı</html>", { status: 404, headers: { "content-type": "text/html" } }));
+  if (/\/api\/graphql/.test(url)) return json({ data: { xdt_direct_inbox: { threads: { edges: [{ node: { thread_key: "340282366841710300949128123456789", thread_title: "Gizli Kişi Adı", users: [{ pk: "1234567890", username: "gizli_kullanici" }], last_activity_timestamp_ms: Date.now() } }], page_info: { end_cursor: "QVFIUjZh", has_next_page: true } } } } });
   if (/direct_v2\/inbox/.test(url)) { const m = url.match(/cursor=(\d+)/); const off = m ? +m[1] : 0; return json({ inbox: { threads: THREADS.slice(off, off + 20), oldest_cursor: String(off + 20), has_older: off + 20 < THREADS.length } }); }
   if (/friendships\/(destroy|create|remove_follower)/.test(url)) return P.get("fail") ? json({ status: "fail", feedback_required: true, feedback_title: "Try Again Later" }, 400) : json({ status: "ok" });
   if (/hide/.test(url)) return json({ status: "ok" });
   return json({}, 404);
 };
+</script>
+<script src="dmcapture.js"></script>
+<script>
+// Instagram web istemcisinin yeni DM sorgusunu taklit et (tanılama testi için)
+window.simulateIgInbox = () => fetch("https://www.instagram.com/api/graphql", { method: "POST", body: new URLSearchParams({ fb_api_req_friendly_name: "PolarisDirectInboxQuery", doc_id: "9876543210123", fb_dtsg: "GIZLI_TOKEN", lsd: "GIZLI_LSD", variables: JSON.stringify({ first: 20, after: null, deviceId: "gizli-cihaz" }) }) });
 </script>
 <script src="watcher.js"></script>
 <script src="inject.js"></script>

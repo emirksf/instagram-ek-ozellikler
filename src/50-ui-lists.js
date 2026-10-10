@@ -25,6 +25,7 @@
       const trunc = s.key === "followers" && S.followersTrunc && !busy;
       let r2;
       if (busy) r2 = `<span class="igd-spin"></span> Taranıyor…`;
+      else if (s.key === "dm" && dmGone()) r2 = has ? `Instagram erişimi değiştirdi · kayıtlı veri ${esc(ageStr(s.t()))}` : "Instagram web'de DM erişimini değiştirdi";
       else if (trunc) r2 = `Eksik: Instagram ${esc(s.n())} verdi`;
       else if (partial) r2 = `Kısmi (durduruldu) · ${esc(s.n())}`;
       else if (has) r2 = `${s.t() ? esc(ageStr(s.t())) : "zamanı bilinmiyor"} · ${esc(s.n())}`;

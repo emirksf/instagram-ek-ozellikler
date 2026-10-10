@@ -1,5 +1,42 @@
 
   // ================================================================ DM'lerim: veri ve işlemler
+  // Instagram 10 Ekim 2026'da web'deki direct_v2 REST uçlarını kaldırdı (404, HTML yanıt). Okumalar artık
+  // Instagram'ın GraphQL sorgularıyla yapılıyor; yeni yol, tanılama raporuyla yanıt yapısı görülünce eklenecek.
+  const DM_GONE_MSG = "Instagram web'deki DM erişimini değiştirdi (eski uç artık yok). DM kutusu şu an bu uygulamayla okunamıyor; kayıtlı DM verin kullanılmaya devam ediyor.";
+  const dmGone = () => !!parseInt(lsGet("igd_dm_gone", "0"), 10);
+  function markDmGone() { if (!dmGone()) lsSet("igd_dm_gone", String(Date.now())); }
+  const dmGoneErr = (res) => { if (res.status === 404) { markDmGone(); return new Error(DM_GONE_MSG); } return null; };
+
+  // --- Uyumluluk tanılaması (capture/00-capture.js ile birlikte çalışır) ---
+  const capActive = () => lsGet("igd_dmcap", "0") === "1" && Date.now() - parseInt(lsGet("igd_dmcap_t", "0"), 10) < 30 * 60000;
+  const capEntries = () => lsJSON("igd_dmcap_data", []);
+  async function startDmCapture() {
+    const ok = await askConfirm({
+      title: "DM uyumluluk tanılaması",
+      html: `<p>Instagram'ın DM kutunu açarken yaptığı isteklerin <b>yalnızca yapısını</b> kaydeder: sorgu adı, sorgu kimliği, alan adları ve veri türleri. Bu rapor yeni DM okuma yolunu doğru yazmak için gerekiyor.</p>
+        <p><b>Kaydedilmeyenler:</b> kişi adları, mesajlar, kimlik numaraları, oturum anahtarları ve çerezler. Rapor yalnızca bu Mac'te, Downloads klasörüne kaydedilir; hiçbir yere gönderilmez.</p>
+        <p class="igd-note">Devam edersen Instagram DM kutun açılır. Birkaç sohbete tıkla ve listeyi biraz aşağı kaydır, sonra üstteki “Denetim paneline dön” ile buraya gelip “Raporu kaydet”e bas. Tanılama 30 dakika sonra kendiliğinden kapanır.</p>`,
+      okLabel: "Başlat ve DM kutusunu aç",
+    });
+    if (!ok) return;
+    lsSet("igd_dmcap", "1"); lsSet("igd_dmcap_t", String(Date.now()));
+    try { localStorage.removeItem("igd_dmcap_data"); } catch (e) {}
+    setView("ig");
+    location.href = "https://www.instagram.com/direct/inbox/"; // tam yükleme: tanılama sayfa başında devreye girer
+  }
+  function saveDmCapture() {
+    const entries = capEntries();
+    if (!entries.length) { toast("Henüz yakalanan istek yok — Instagram görünümünde DM kutunu açıp birkaç sohbete tıkla.", true); return; }
+    const name = `instagram-dm-tanilama-${stampNow()}.json`;
+    saveTextFile(name, JSON.stringify({ app: "instadenetim-dm-tanilama", v: 1, t: Date.now(), surum: "4.1", entries }, null, 2),
+      "DM tanılama raporu kaydedildi", `Tanılama raporu Downloads/${name} dosyasına kaydedildi ✓ (${entries.length} istek)`);
+  }
+  function stopDmCapture() {
+    lsSet("igd_dmcap", "0");
+    try { localStorage.removeItem("igd_dmcap_data"); } catch (e) {}
+    toast("Tanılama kapatıldı; bir sonraki sayfa yüklemesinde tamamen devre dışı kalır.");
+    render();
+  }
   async function hideThread(id) {
     const csrf = getCookie("csrftoken");
     if (!csrf) throw new Error("csrftoken yok — sayfayı yenileyin.");
@@ -10,7 +47,7 @@
     });
     let ok = res.ok;
     try { const j = await res.json(); ok = ok && (j.status === "ok"); } catch (e) {}
-    if (!ok) throw new Error(res.status === 404 ? "HTTP 404 (web'de kapalı)" : "HTTP " + res.status);
+    if (!ok) throw new Error(res.status === 404 ? "HTTP 404 (Instagram web'de sohbet silmeyi kaldırdı)" : "HTTP " + res.status);
     return true;
   }
 
@@ -64,7 +101,7 @@
       let res;
       try { res = await api(url); } catch (e) { await sleep(1500); continue; }
       if (res.status === 429) { await sleep(30000); continue; }
-      if (!res.ok) break;
+      if (!res.ok) { const g = dmGoneErr(res); if (g) throw g; break; }
       let d; try { d = await res.json(); } catch (e) { break; }
       const inbox = d.inbox || {};
       for (const t of (inbox.threads || [])) {
@@ -200,7 +237,7 @@
       let res;
       try { res = await api(url); } catch (e) { await sleep(2000); continue; }
       if (res.status === 429) { onProgress && onProgress(items.length, "limit — 30 sn"); await sleep(30000); continue; }
-      if (!res.ok) { if (guard === 1) throw new Error("Sohbet okunamadı (HTTP " + res.status + ")"); break; }
+      if (!res.ok) { if (guard === 1) throw dmGoneErr(res) || new Error("Sohbet okunamadı (HTTP " + res.status + ")"); break; }
       let d; try { d = await res.json(); } catch (e) { break; }
       const th = d.thread || {};
       (th.items || []).forEach((it) => {
