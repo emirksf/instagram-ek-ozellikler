@@ -2,7 +2,7 @@
 set -e
 cd "$(dirname "$0")"
 
-APP="Emir Kosif Instagram Takip Denetimi v2.0.app"
+APP="Emir Kosif Instagram Takip Denetimi v4.1.app"
 
 echo "==> Eski derleme temizleniyor..."
 rm -rf "$APP" AppIcon.iconset AppIcon.icns

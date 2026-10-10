@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
-        window.title = "Emir Kosif · Instagram Takip Denetimi v2.0"
+        window.title = "Emir Kosif · Instagram Takip Denetimi v4.1"
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.center()

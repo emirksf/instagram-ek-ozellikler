@@ -21,7 +21,7 @@ Instagram'ı bir WKWebView içinde açan ve üstüne analiz paneli yükleyen mac
 ```
 
 ```bash
-ditto "Emir Kosif Instagram Takip Denetimi v2.0.app" "/Applications/Emir Kosif Instagram Takip Denetimi v2.0.app"
+ditto "Emir Kosif Instagram Takip Denetimi v4.1.app" "/Applications/Emir Kosif Instagram Takip Denetimi v4.1.app"
 ```
 
 ## Test (gerçek hesaba dokunmadan)

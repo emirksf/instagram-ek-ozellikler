@@ -685,7 +685,7 @@
     <nav class="igd-side" aria-label="Bölümler">
       <div class="igd-brandrow">
         <div class="igd-logo igd-grad" aria-hidden="true">${ic("analysis", 18)}</div>
-        <div class="igd-brand"><b>Instagram Takip Denetimi</b><small>Emir Kosif · v2.0</small></div>
+        <div class="igd-brand"><b>Instagram Takip Denetimi</b><small>Emir Kosif · v4.1</small></div>
       </div>
       ${Object.keys(PAGES).map((k) => (k === "settings" ? `<div class="igd-sp"></div>` : "") +
         `<button class="igd-nav" data-sec="${k}" title="${PAGES[k].label}">${ic(PAGES[k].icon, 18)}<span class="lbl">${PAGES[k].label}</span></button>`).join("")}
