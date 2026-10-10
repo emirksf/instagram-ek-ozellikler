@@ -23,6 +23,7 @@
   }
 
   function dmRowHtml(t, i) {
+    const canRetract = !dmGone();
     const sel = S.dmSel.has(t.id);
     const u0 = t.users[0] || {};
     const title = t.group ? esc(t.title || "Grup") : `@${esc(u0.username || t.title || "?")}`;
@@ -33,7 +34,7 @@
         <div class="igd-name">${t.group ? ic("users", 14) : ""}${title}${t.group ? '<span class="igd-tag">Grup</span>' : ""}</div>
         <div class="igd-dmdate">${dmThreadDate(t.act)}</div>
       </div>
-      <div class="igd-actions">
+      <div class="igd-actions" ${canRetract ? "" : "hidden"}>
         <button class="igd-mini" data-retract="${esc(t.id)}" title="Bu sohbette gönderdiğin mesajları geri çek (iki taraftan siler)" aria-label="${title}: gönderdiğim mesajları geri çek">${ic("undo", 13)} Mesajlarım</button>
       </div>
     </div>`;
@@ -65,8 +66,8 @@
     const n = capEntries().length;
     const cap = capActive()
       ? `<span><b>Tanılama açık</b> · ${n} istek yakalandı.</span><button class="igd-btn sm primary" id="igd-cap-save">${ic("download", 12)} Raporu kaydet</button><button class="igd-btn sm ghost" id="igd-cap-stop">Tanılamayı bitir</button>`
-      : `<button class="igd-btn sm" id="igd-cap-start">Uyumluluk tanılaması…</button>`;
-    return `<div class="igd-bar2 warn">${ic("alert", 14)}<span>Instagram web'deki DM erişimini değiştirdi (10 Ekim 2026). Yenileme, kişi bulma, silme ve geri çekme şu an çalışmıyor${S.dmThreads.length ? `; kayıtlı DM verin (${esc(ageStr(S.dmScanTime))}) gösteriliyor` : ""}.</span><span class="igd-sp"></span>${cap}</div>`;
+      : `<button class="igd-btn sm ghost" id="igd-cap-start">Sorun olursa: tanılama…</button>`;
+    return `<div class="igd-bar2 warn">${ic("alert", 14)}<span>Instagram 10 Ekim 2026'da web'deki eski DM uçlarını kaldırdı. DM listesi yeni yöntemle okunuyor; <b>sohbet silme ve mesaj geri çekmenin web'de karşılığı kalmadı</b>, bunları Instagram uygulamasından yapabilirsin.</span><span class="igd-sp"></span>${cap}</div>`;
   }
   function wireDmGoneBar() {
     const a = $("igd-cap-start"); if (a) a.onclick = startDmCapture;
@@ -78,14 +79,15 @@
     const el = $("igd-dm-head"); if (!el) return;
     const btn = $("igd-dm-del");
     const n = S.dmSel.size;
-    if (btn) { btn.disabled = n === 0 || isBusy(); btn.textContent = `Seçilenleri sil (${n})`; }
+    if (btn) { btn.disabled = n === 0 || isBusy(); btn.textContent = `Seçilenleri sil (${n})`; btn.hidden = dmGone(); }
+    const bk = $("igd-dm-backup"); if (bk) bk.parentElement.hidden = dmGone();
     if (!S.dmThreads.length) { el.innerHTML = dmGoneBar(); wireDmGoneBar(); return; }
     const vis = S.dmVis;
     const all = vis.length > 0 && vis.every((t) => S.dmSel.has(t.id));
     el.innerHTML = dmGoneBar() + `<div class="igd-selbar">
       <label class="igd-chk"><input type="checkbox" class="igd-cb" id="igd-dm-all" ${all ? "checked" : ""} ${vis.length ? "" : "disabled"}/> Tümünü seç</label>
       <span>${fmtN(S.dmThreads.length)} sohbet yüklü · ${fmtN(vis.length)} görünüyor${n ? ` · <b>${fmtN(n)} seçili</b>` : ""}</span>
-      <span class="igd-sp"></span><span class="igd-note">Silme kalıcıdır · Shift+tık: aralık seç</span></div>`;
+      <span class="igd-sp"></span><span class="igd-note">${dmGone() ? "Silme ve geri çekme web'de yok" : "Silme kalıcıdır"} · Shift+tık: aralık seç</span></div>`;
     wireDmGoneBar();
     $("igd-dm-all").onchange = (e) => {
       if (e.target.checked) vis.forEach((t) => S.dmSel.add(t.id)); else vis.forEach((t) => S.dmSel.delete(t.id));

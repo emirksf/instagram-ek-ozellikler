@@ -7,6 +7,151 @@
   function markDmGone() { if (!dmGone()) lsSet("igd_dm_gone", String(Date.now())); }
   const dmGoneErr = (res) => { if (res.status === 404) { markDmGone(); return new Error(DM_GONE_MSG); } return null; };
 
+  // ================================================================ DM: GraphQL istemcisi
+  // Sorgu kimlikleri (doc_id) Instagram'ın web istemcisinden alındı (tanılama raporu, 10 Ekim 2026).
+  // Instagram bunları değiştirirse capture/00-capture.js, DM kutusu Instagram görünümünde bir kez açıldığında
+  // güncel kimlikleri kendiliğinden öğrenir (igd_gql_docs). Oturum anahtarları yalnızca bellekteki şablondan gelir.
+  const GQL_DEFAULTS = {
+    PolarisDirectInboxQuery: { doc_id: "27909866362025854", vars: {
+      __relay_internal__pv__IGDIsProfessionalAccountGKrelayprovider: true,
+      __relay_internal__pv__IGDPinnedThreadsRenderEnabledGKrelayprovider: true,
+      __relay_internal__pv__IGDMaxUnreadMessagesCountrelayprovider: 9,
+      __relay_internal__pv__IGDThreadListActionsEnabledGKrelayprovider: true } },
+    IGDThreadListProfessionalOffMsysPaginationQuery: { doc_id: "28415566141432177", vars: {
+      system_folder: "INBOX",
+      __relay_internal__pv__IGDPinnedThreadsRenderEnabledGKrelayprovider: true,
+      __relay_internal__pv__IGDMaxUnreadMessagesCountrelayprovider: 9,
+      __relay_internal__pv__IGDThreadListActionsEnabledGKrelayprovider: true } },
+  };
+  const GQL_HINT = "Instagram görünümüne geçip DM kutunu bir kez açarsan uygulama Instagram'ın güncel sorgu kimliklerini öğrenir; sonra yeniden dene.";
+  const gqlDocs = () => Object.assign({}, GQL_DEFAULTS, lsJSON("igd_gql_docs", {}));
+  function gqlErr(msg, unavailable) { const e = new Error(msg); if (unavailable) e.gqlUnavailable = true; return e; }
+  function uuid4() {
+    const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  }
+
+  // İstek şablonu: Instagram'ın kendi son GraphQL isteği (bellekte). Yoksa sayfadaki anahtarlardan asgari şablon kurulur.
+  async function gqlTemplate() {
+    for (let i = 0; i < 20 && !window.__igdGql; i++) await sleep(250);
+    if (window.__igdGql) return { params: new URLSearchParams(window.__igdGql.params), headers: window.__igdGql.headers || {} };
+    const html = document.documentElement.innerHTML;
+    const dtsg = (html.match(/"DTSGInitialData",\[\],\{"token":"([^"]+)"/) || [])[1];
+    const lsd = (html.match(/"LSD",\[\],\{"token":"([^"]+)"/) || [])[1];
+    if (!dtsg || !lsd) throw gqlErr("Instagram oturum anahtarları bulunamadı. Instagram görünümünde sayfayı bir kez yenileyip tekrar dene.", true);
+    let sum = 0; for (const ch of dtsg) sum += ch.charCodeAt(0);
+    return { params: new URLSearchParams({ __a: "1", __user: "0", __comet_req: "7", fb_dtsg: dtsg, lsd, jazoest: "2" + sum }), headers: {} };
+  }
+
+  async function gql(name, vars) {
+    const doc = gqlDocs()[name];
+    if (!doc) throw gqlErr(`Instagram sorgusu bilinmiyor (${name}). ${GQL_HINT}`, true);
+    const tpl = await gqlTemplate();
+    const p = tpl.params;
+    ["fb_api_analytics_tags", "qpl_active_flow_ids", "__crn"].forEach((k) => p.delete(k));
+    p.set("fb_api_caller_class", "RelayModern");
+    p.set("fb_api_req_friendly_name", name);
+    p.set("server_timestamps", "true");
+    p.set("variables", JSON.stringify(vars));
+    p.set("doc_id", doc.doc_id);
+    const headers = {
+      "content-type": "application/x-www-form-urlencoded",
+      "x-fb-friendly-name": name,
+      "x-ig-app-id": tpl.headers["x-ig-app-id"] || APP_ID,
+      "x-fb-lsd": p.get("lsd") || tpl.headers["x-fb-lsd"] || "",
+      "x-asbd-id": tpl.headers["x-asbd-id"] || "359341",
+      "x-csrftoken": getCookie("csrftoken") || "",
+    };
+    const doFetch = window.__igdNativeFetch || fetch;
+    let res;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { res = await doFetch("https://www.instagram.com/api/graphql", { method: "POST", headers, body: p.toString(), credentials: "include" }); }
+      catch (e) { await sleep(2000); continue; }
+      if (res.status === 429) { setStatus("hız limiti — 30 sn bekleniyor"); await sleep(30000); continue; }
+      break;
+    }
+    if (!res) throw new Error("Instagram'a bağlanılamadı.");
+    if (res.status === 404) throw gqlErr(`Instagram DM sorgusu bulunamadı (HTTP 404). ${GQL_HINT}`, true);
+    if (!res.ok) throw new Error(`Instagram DM sorgusu reddedildi (HTTP ${res.status}).`);
+    const text = (await res.text()).replace(/^for \(;;\);/, "");
+    const first = text.split(/\r?\n/).find((l) => l.trim().startsWith("{"));
+    let j; try { j = JSON.parse(first); } catch (e) { throw gqlErr(`Instagram DM yanıtı okunamadı. ${GQL_HINT}`, true); }
+    if (!j.data && j.errors && j.errors.length) throw gqlErr(`Instagram DM sorgusu hata verdi: ${j.errors[0].message || j.errors[0].summary || "bilinmeyen"}. ${GQL_HINT}`, true);
+    return j;
+  }
+
+  // Sohbet düğümünü uygulamanın sohbet biçimine çevir (eski REST biçimiyle aynı alanlar)
+  function threadFromGql(n) {
+    const t = n && (n.as_ig_direct_thread || n);
+    if (!t || !t.thread_id) return null;
+    const users = (t.users || []).map((u) => ({ pk: String(u.pk || u.id), username: u.username, pic: u.profile_pic_url }));
+    const group = t.is_group === true || users.length > 1;
+    const act = parseInt(t.last_activity_timestamp_ms, 10) || 0;
+    return { id: String(t.thread_id), fbid: String(t.thread_fbid || ""), folder: t.folder || null, users, group, act,
+      title: t.thread_title || users.map((u) => u.username).join(", ") };
+  }
+
+  async function fetchDMThreadsGql(onProgress) {
+    const map = {}, threads = [], seen = new Set(), folders = new Set();
+    const add = (node) => {
+      const th = threadFromGql(node); if (!th || seen.has(th.id)) return;
+      seen.add(th.id); threads.push(th);
+      if (th.folder) folders.add(th.folder);
+      if (!th.group && th.users.length === 1) { const pk = th.users[0].pk; if (!map[pk] || th.act > map[pk]) map[pk] = th.act; }
+    };
+    const docs = gqlDocs();
+    const deviceId = lsGet("igd_dm_device", "") || (lsSet("igd_dm_device", uuid4()), lsGet("igd_dm_device", ""));
+    const first = await gql("PolarisDirectInboxQuery", Object.assign({}, docs.PolarisDirectInboxQuery.vars, { device_id_for_iris_subscription: deviceId }));
+    const mb = first.data && first.data.get_slide_mailbox_for_iris_subscription;
+    if (!mb) throw gqlErr(`Instagram DM yanıtı beklenen biçimde değil. ${GQL_HINT}`, true);
+    const main = mb.threads_by_system_folder_and_ig_inbox_folder;
+    [main, mb.threads_by_folder].forEach((c) => ((c && c.edges) || []).forEach((e) => add(e.node)));
+    (mb.pinned_threads_v2 || []).forEach(add);
+    let pages = 1;
+    onProgress && onProgress(pages, threads.length, "");
+
+    // Sayfalama: Instagram'ın öğrenilmiş sayfalama sorgusu (profesyonel hesapta klasör bazlı)
+    const pagName = Object.keys(docs).find((k) => /^IGDThreadList\w*PaginationQuery$/.test(k) && lsJSON("igd_gql_docs", {})[k]) || "IGDThreadListProfessionalOffMsysPaginationQuery";
+    const pag = docs[pagName];
+    const learnedFolder = pag.vars && pag.vars.ig_inbox_folder;
+    const order = [...new Set([learnedFolder, ...folders].filter(Boolean))];
+    if (!order.length) order.push(null);
+    let partial = false;
+    for (const folder of order) {
+      let cursor = folder === order[0] && main && main.page_info ? main.page_info.end_cursor : null;
+      let hasNext = folder === order[0] && main && main.page_info ? !!main.page_info.has_next_page : true;
+      let count = 20, guard = 0;
+      while (hasNext && !S.stopFlag && ++guard <= 100) {
+        const vars = Object.assign({}, pag.vars, { count, cursor, id: mb.id });
+        if (folder) vars.ig_inbox_folder = folder;
+        let r;
+        try { r = await gql(pagName, vars); }
+        catch (e) {
+          // Instagram büyük sayfayı reddederse kendi kullandığı sayfa boyutuna dön
+          if (count !== (pag.vars.count || 9)) { count = pag.vars.count || 9; continue; }
+          if (folder !== order[0]) break; // tahmin edilen ikinci klasör yoksa sorun değil
+          partial = true; jobLog(`DM listesinin devamı alınamadı: ${e.message}`, "warn"); break;
+        }
+        const conn = r.data && r.data.fetch__SlideMailbox && r.data.fetch__SlideMailbox.threads_by_system_folder_and_ig_inbox_folder;
+        if (!conn) { partial = true; break; }
+        (conn.edges || []).forEach((e) => add(e.node));
+        pages++;
+        onProgress && onProgress(pages, threads.length, "");
+        cursor = conn.page_info && conn.page_info.end_cursor;
+        hasNext = !!(conn.page_info && conn.page_info.has_next_page && cursor);
+        await sleep(rand(500, 1000));
+      }
+    }
+    // Güvenlik kontrolü: DM kişileri takip listesindeki kimliklerle eşleşmeli (Instagram kimlik biçimini değiştirirse uyar)
+    const dmPks = Object.keys(map);
+    if (S.following.length > 50 && dmPks.length > 20 && !dmPks.some((pk) => S.followingIds.has(pk))) {
+      jobLog("Uyarı: DM'deki kişiler takip listendeki hiçbir kimlikle eşleşmedi; Etkileşimsizler sekmesi yanıltıcı olabilir.", "warn");
+    }
+    if (partial) jobLog(`DM listesi kısmi (${threads.length} sohbet). ${GQL_HINT}`, "warn");
+    return { map, threads };
+  }
+
   // --- Uyumluluk tanılaması (capture/00-capture.js ile birlikte çalışır) ---
   const capActive = () => lsGet("igd_dmcap", "0") === "1" && Date.now() - parseInt(lsGet("igd_dmcap_t", "0"), 10) < 30 * 60000;
   const capEntries = () => lsJSON("igd_dmcap_data", []);
@@ -83,75 +228,18 @@
 
   const threadName = (t) => t ? (t.group ? (t.title || "Grup") : "@" + ((t.users[0] || {}).username || t.title || t.id)) : "?";
 
-  const threadFromRaw = (t) => {
-    if (!t || !t.thread_id) return null;
-    const users = (t.users || []).map((u) => ({ pk: String(u.pk), username: u.username, pic: u.profile_pic_url }));
-    const act = t.last_activity_at ? Math.floor(t.last_activity_at / 1000) : 0;
-    return { id: t.thread_id, users, group: users.length > 1, act, title: t.thread_title || users.map((u) => u.username).join(", ") };
-  };
-
-  // Gelen kutusunda belirli bir kişiyi (pk) BULANA KADAR tarar, bulunca durur (tümünü taramaz).
-  async function findThreadInInbox(targetPk, onProgress) {
-    let cursor = "", guard = 0;
-    const base = "https://www.instagram.com/api/v1/direct_v2/inbox/?persistentBadging=true&limit=20&thread_message_limit=1";
-    while (true) {
-      if (S.stopFlag) break;
-      if (++guard > 80) break;
-      const url = cursor ? `${base}&cursor=${encodeURIComponent(cursor)}&direction=older` : base;
-      let res;
-      try { res = await api(url); } catch (e) { await sleep(1500); continue; }
-      if (res.status === 429) { await sleep(30000); continue; }
-      if (!res.ok) { const g = dmGoneErr(res); if (g) throw g; break; }
-      let d; try { d = await res.json(); } catch (e) { break; }
-      const inbox = d.inbox || {};
-      for (const t of (inbox.threads || [])) {
-        const users = t.users || [];
-        if (users.length === 1 && String(users[0].pk) === String(targetPk)) return threadFromRaw(t);
-      }
-      onProgress && onProgress(guard);
-      cursor = inbox.oldest_cursor;
-      if (!inbox.has_older || !cursor) break;
-      await sleep(rand(400, 800));
-    }
-    return null;
-  }
-
-  // Kullanıcı adından o kişiyle sohbeti bul. Önce hızlı uç, olmazsa kutuda ara.
-  async function fetchThreadByUser(username, onProgress) {
-    const acc = await resolveUser(username); // {id, username, ...}
-    // 1) Hızlı yol: get_by_participants (bazı hesaplarda 404 döner → yut, yedeğe geç)
-    try {
-      const url = `https://www.instagram.com/api/v1/direct_v2/threads/get_by_participants/?recipient_users=${encodeURIComponent("[" + acc.id + "]")}`;
-      const res = await api(url);
-      if (res.ok) {
-        const d = await res.json();
-        const th = threadFromRaw(d.thread);
-        if (th) return { acc, thread: th };
-      }
-    } catch (e) { /* yedek yola geç */ }
-    // 2) Yedek: gelen kutusunda o kişiyi bulana kadar tara (bulunca durur)
-    onProgress && onProgress(0);
-    const th = await findThreadInInbox(acc.id, onProgress);
-    return { acc, thread: th };
-  }
-
+  // Kişiyle sohbeti bul. Instagram'ın eski uçları (get_by_participants / inbox) web'de kalktığı için
+  // önce yüklü DM listesinde aranır; liste yoksa DM kutusu taranır.
   async function dmFindPerson() {
-    if (guardBusy()) return;
-    const uname = (($("igd-dm-find") || {}).value || "").trim().replace(/^@/, "");
+    const uname = (($("igd-dm-find") || {}).value || "").trim().replace(/^@/, "").toLowerCase();
     if (!uname) { toast("Bir kullanıcı adı yaz.", true); return; }
-    S.dmBusy = true; S.stopFlag = false;
-    startJob({ title: `@${uname} ile sohbet aranıyor` });
-    let summary = "";
-    try {
-      const { acc, thread } = await fetchThreadByUser(uname, (p) => { if (p) setStatus(`Gelen kutusunda aranıyor: ${p}. sayfa...`); });
-      if (!thread) { summary = `@${acc.username} ile mevcut bir sohbet bulunamadı (ya da çok eski).`; return; }
-      if (!S.dmThreads.some((x) => x.id === thread.id)) S.dmThreads.unshift(thread);
-      S.dmQuery = acc.username;
-      const q = $("igd-dm-q"); if (q) q.value = acc.username;
-      summary = `@${acc.username} sohbeti getirildi — listeden işlem yapabilirsin.`;
-    } catch (e) {
-      summary = "Hata: " + e.message; toast(e.message, true);
-    } finally { S.dmBusy = false; S.stopFlag = false; jobFinish(summary); render(); }
+    if (!S.dmThreads.length) { toast("Önce DM kutusunu tara; sonra kişiyi yüklü listede bulurum.", true); return; }
+    const hit = S.dmThreads.find((t) => !t.group && t.users.some((u) => (u.username || "").toLowerCase() === uname));
+    if (!hit) { toast(`@${uname} ile yüklü sohbet bulunamadı. DM kutusunu yenileyip tekrar dene.`, true); return; }
+    S.dmQuery = uname;
+    const q = $("igd-dm-q"); if (q) q.value = uname;
+    render();
+    toast(`@${uname} sohbeti listede gösteriliyor.`);
   }
 
   async function deleteDMs() {

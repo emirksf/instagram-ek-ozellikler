@@ -140,7 +140,7 @@
   .igd-btn{display:inline-flex;align-items:center;gap:6px;font:inherit;border:1px solid var(--igd-border3);background:var(--igd-btn);color:var(--igd-text);border-radius:10px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;}
   .igd-btn:hover{background:var(--igd-hover);}
   .igd-btn:disabled{opacity:.4;cursor:not-allowed;}
-  .igd-btn[hidden]{display:none;}
+  .igd-btn[hidden],#igd-root [hidden]{display:none !important;}
   .igd-btn.sm{padding:5px 10px;font-size:12px;border-radius:8px;}
   .igd-btn.primary{border-color:transparent;color:#fff;background:linear-gradient(90deg,#4f5bd5,#962fbf);}
   .igd-btn.primary:hover{filter:brightness(1.08);}

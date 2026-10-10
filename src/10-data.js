@@ -314,8 +314,17 @@
 
   // ================================================================ VERİ: DM kutusu
   // DM kutusunu sayfalayıp hem etkileşim haritasını (pk->ms) hem de sohbet listesini çeker.
-  // Yalnızca liste ve tarih; mesaj içeriği okunmaz.
+  // Yalnızca liste ve tarih; mesaj içeriği okunmaz. Instagram 10 Ekim 2026'dan beri web'de DM'leri yalnızca
+  // GraphQL ile veriyor; eski REST ucu (direct_v2/inbox) yalnızca yedek olarak denenir.
   async function fetchDMThreads(onProgress) {
+    try { return await fetchDMThreadsGql(onProgress); }
+    catch (e) {
+      if (e && e.gqlUnavailable && !dmGone()) return await fetchDMThreadsRest(onProgress); // eski uç hâlâ açıksa
+      throw e;
+    }
+  }
+
+  async function fetchDMThreadsRest(onProgress) {
     const map = {}, threads = [];
     let cursor = "", pages = 0, guard = 0;
     const base = "https://www.instagram.com/api/v1/direct_v2/inbox/?persistentBadging=true&limit=20&thread_message_limit=1";

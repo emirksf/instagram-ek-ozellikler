@@ -36,7 +36,17 @@ window.fetch = (url, opts) => {
   if (/feed\/user\/42/.test(url)) return json({ items: POSTS });
   if (/media\/.+\/likers/.test(url)) return json({ users: FOLLOWERS.slice(0, 40).map((u) => ({ pk: u.pk, username: u.username })) });
   if (P.get("dmgone") === "1" && /direct_v2/.test(url)) return Promise.resolve(new Response("<html>Sayfa bulunamadı</html>", { status: 404, headers: { "content-type": "text/html" } }));
-  if (/\/api\/graphql/.test(url)) return json({ data: { xdt_direct_inbox: { threads: { edges: [{ node: { thread_key: "340282366841710300949128123456789", thread_title: "Gizli Kişi Adı", users: [{ pk: "1234567890", username: "gizli_kullanici" }], last_activity_timestamp_ms: Date.now() } }], page_info: { end_cursor: "QVFIUjZh", has_next_page: true } } } } });
+  if (/\/api\/graphql/.test(url)) {
+    // Instagram'ın 10 Ekim 2026 GraphQL DM yanıt yapısı (tanılama raporundan)
+    const bp = new URLSearchParams(String(opts && opts.body || ""));
+    const name = bp.get("fb_api_req_friendly_name"); let v = {}; try { v = JSON.parse(bp.get("variables") || "{}"); } catch (e) {}
+    const node = (t) => ({ node: { as_ig_direct_thread: { thread_id: t.thread_id, thread_fbid: "1" + t.thread_id.slice(1, 16), folder: "PRIMARY", is_group: false, thread_title: t.users[0].username,
+      last_activity_timestamp_ms: String(Math.floor(t.last_activity_at / 1000)), users: t.users.map((u) => ({ id: String(u.pk), pk: String(u.pk), username: u.username, profile_pic_url: "" })) }, __typename: "XIGDirectThreadEdge" }, cursor: "c" });
+    const conn = (off, n) => ({ edges: THREADS.slice(off, off + n).map(node), page_info: { end_cursor: "c" + (off + n), has_next_page: off + n < THREADS.length } });
+    if (name === "PolarisDirectInboxQuery") return json({ data: { get_slide_mailbox_for_iris_subscription: { id: "123456789012345", threads_by_system_folder_and_ig_inbox_folder: conn(0, 15), threads_by_folder: conn(0, 15), pinned_threads_v2: [] } } });
+    if (/PaginationQuery$/.test(name)) { const off = parseInt(String(v.cursor || "c0").slice(1), 10); return json({ data: { fetch__SlideMailbox: { id: v.id, threads_by_system_folder_and_ig_inbox_folder: conn(off, Math.min(v.count || 5, 20)) } } }); }
+    return json({ data: {} });
+  }
   if (/direct_v2\/inbox/.test(url)) { const m = url.match(/cursor=(\d+)/); const off = m ? +m[1] : 0; return json({ inbox: { threads: THREADS.slice(off, off + 20), oldest_cursor: String(off + 20), has_older: off + 20 < THREADS.length } }); }
   if (/friendships\/(destroy|create|remove_follower)/.test(url)) return P.get("fail") ? json({ status: "fail", feedback_required: true, feedback_title: "Try Again Later" }, 400) : json({ status: "ok" });
   if (/hide/.test(url)) return json({ status: "ok" });
@@ -46,6 +56,8 @@ window.fetch = (url, opts) => {
 <script src="dmcapture.js"></script>
 <script>
 // Instagram web istemcisinin yeni DM sorgusunu taklit et (tanılama testi için)
+// Instagram sayfası açılınca kendi GraphQL isteklerini yapar → uygulama oturum şablonunu öğrenir
+_st(() => window.simulateIgInbox(), 0);
 window.simulateIgInbox = () => fetch("https://www.instagram.com/api/graphql", { method: "POST", body: new URLSearchParams({ fb_api_req_friendly_name: "PolarisDirectInboxQuery", doc_id: "9876543210123", fb_dtsg: "GIZLI_TOKEN", lsd: "GIZLI_LSD", variables: JSON.stringify({ first: 20, after: null, deviceId: "gizli-cihaz" }) }) });
 </script>
 <script src="watcher.js"></script>
