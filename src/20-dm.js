@@ -17,6 +17,11 @@
       __relay_internal__pv__IGDPinnedThreadsRenderEnabledGKrelayprovider: true,
       __relay_internal__pv__IGDMaxUnreadMessagesCountrelayprovider: 9,
       __relay_internal__pv__IGDThreadListActionsEnabledGKrelayprovider: true } },
+    IGDThreadDetailQuery: { doc_id: "29613940454875963", vars: {
+      __relay_internal__pv__IGDEnableOffMsysChatThemesQErelayprovider: false,
+      __relay_internal__pv__IGDInitialMessagePageCountrelayprovider: 20 } },
+    IGDMessageUnsendDialogOffMsysMutation: { doc_id: "26948700068153789", vars: {} },
+    IGDInboxInfoDeleteThreadDialogOffMsysMutation: { doc_id: "35352443081068612", vars: {} },
     IGDThreadListProfessionalOffMsysPaginationQuery: { doc_id: "28415566141432177", vars: {
       system_folder: "INBOX",
       __relay_internal__pv__IGDPinnedThreadsRenderEnabledGKrelayprovider: true,
@@ -182,17 +187,13 @@
     toast("Tanılama kapatıldı; bir sonraki sayfa yüklemesinde tamamen devre dışı kalır.");
     render();
   }
+  // Sohbeti sil — Instagram web'in "Sohbeti sil" işlemiyle aynı (IGDInboxInfoDeleteThreadDialogOffMsysMutation).
+  // Yeni biçimdeki sohbet kimliği (thread_fbid) gerekir; eski kayıtlarda yoksa DM kutusu yenilenmeli.
   async function hideThread(id) {
-    const csrf = getCookie("csrftoken");
-    if (!csrf) throw new Error("csrftoken yok — sayfayı yenileyin.");
-    const res = await api(`https://www.instagram.com/api/v1/direct_v2/threads/${id}/hide/`, {
-      method: "POST",
-      headers: { "x-csrftoken": csrf, "x-instagram-ajax": "1", "content-type": "application/x-www-form-urlencoded" },
-      body: "use_unified_inbox=true",
-    });
-    let ok = res.ok;
-    try { const j = await res.json(); ok = ok && (j.status === "ok"); } catch (e) {}
-    if (!ok) throw new Error(res.status === 404 ? "HTTP 404 (Instagram web'de sohbet silmeyi kaldırdı)" : "HTTP " + res.status);
+    const t = S.dmThreads.find((x) => x.id === id);
+    if (!t || !t.fbid) throw new Error("Bu sohbetin yeni kimliği yok — DM kutusunu yenile");
+    const j = await gql("IGDInboxInfoDeleteThreadDialogOffMsysMutation", { thread_fbid: t.fbid, should_move_future_requests_to_spam: false });
+    if (!(j.data && j.data.ig_direct_hide_thread)) throw new Error("Instagram sohbeti silmedi");
     return true;
   }
 
@@ -246,6 +247,10 @@
     if (guardBusy()) return;
     const ids = [...S.dmSel].filter((id) => S.dmThreads.some((t) => t.id === id));
     if (!ids.length) { toast("En az bir sohbet seç.", true); return; }
+    if (ids.some((id) => !S.dmThreads.find((t) => t.id === id).fbid)) {
+      toast("Seçili sohbetlerin bazıları eski kayıttan geliyor ve Instagram'ın yeni kimliğini taşımıyor. Önce DM kutusunu yenile.", true);
+      return;
+    }
 
     const ok = await askConfirm({
       title: `${ids.length} sohbet kalıcı olarak silinecek`,
@@ -283,10 +288,7 @@
           if (done % 10 === 0 && !S.stopFlag) { jobLog("⏳ Güvenlik molası ~20 sn...", "warn"); await pSleep(20000); }
         }
       }
-      if (had404) {
-        jobLog("ℹ️ Instagram web'in bu sürümünde sohbeti tümden silme (hide) ucu kapalı görünüyor. Alternatif: sohbet satırındaki “↩︎ Mesajlarım” ile KENDİ mesajlarını geri çekebilirsin — bu, mesajları iki taraftan da kaldırır. Sohbeti tümüyle silmek için Instagram uygulamasını kullan.", "warn");
-        toast("Sohbet silme web'de kapalı; '↩︎ Mesajlarım' ile mesajları geri çekebilirsin.", true);
-      }
+      if (had404) jobLog(`Instagram silme isteğini tanımadı. ${GQL_HINT}`, "warn");
     } finally {
       S.dmBusy = false; S.stopFlag = false; S.paused = false;
       if (hist.length) { hist.forEach((h) => S.hist.push(h)); histAdd(hist).catch(() => {}); }
@@ -313,44 +315,54 @@
   }
 
   // --- Bir kişiye gönderdiğim mesajları geri çek (iki taraftan da siler) ---
-  async function fetchMyMessages(threadId, onProgress) {
-    const myId = getCookie("ds_user_id");
-    const items = [];
-    let cursor = "", guard = 0;
-    const base = `https://www.instagram.com/api/v1/direct_v2/threads/${threadId}/?limit=20`;
-    while (true) {
-      if (S.stopFlag) break;
-      if (++guard > 250) break;
-      const url = cursor ? `${base}&cursor=${encodeURIComponent(cursor)}` : base;
-      let res;
-      try { res = await api(url); } catch (e) { await sleep(2000); continue; }
-      if (res.status === 429) { onProgress && onProgress(items.length, "limit — 30 sn"); await sleep(30000); continue; }
-      if (!res.ok) { if (guard === 1) throw dmGoneErr(res) || new Error("Sohbet okunamadı (HTTP " + res.status + ")"); break; }
-      let d; try { d = await res.json(); } catch (e) { break; }
-      const th = d.thread || {};
-      (th.items || []).forEach((it) => {
-        if (String(it.user_id) === String(myId) && it.item_type !== "action_log") {
-          items.push({ id: it.item_id, type: it.item_type, text: it.text || "", ts: it.timestamp });
-        }
-      });
-      onProgress && onProgress(items.length, "");
-      cursor = th.oldest_cursor;
-      if (!th.has_older || !cursor) break;
-      await sleep(rand(500, 1000));
+  // Mesaj metnini (yedek için) yanıttan çıkar: düz metin, metin parçaları ya da bağlantı/paylaşım başlığı
+  function messageText(n) {
+    if (n.text_body) return String(n.text_body);
+    const c = n.content || {};
+    if (Array.isArray(c.text_fragments)) {
+      const parts = c.text_fragments.map((f) => (typeof f === "string" ? f : Object.values(f || {}).filter((v) => typeof v === "string").join(""))).join("");
+      if (parts) return parts;
     }
+    return c.xma_text_body || "";
+  }
+
+  // Sohbetteki SENİN gönderdiğin mesajlar (IGDThreadDetailQuery). Instagram önce sınırlı sayıda son mesajı verir;
+  // daha büyük sayfa istenir, kabul edilmezse Instagram'ın kendi sayfa boyutuna dönülür.
+  async function fetchMyMessages(threadId, onProgress) {
+    const t = S.dmThreads.find((x) => x.id === threadId);
+    if (!t || !t.fbid) throw new Error("Bu sohbetin yeni kimliği yok — önce DM kutusunu yenile.");
+    const base = gqlDocs().IGDThreadDetailQuery.vars || {};
+    let j = null;
+    for (const count of [200, base.__relay_internal__pv__IGDInitialMessagePageCountrelayprovider || 20]) {
+      try {
+        j = await gql("IGDThreadDetailQuery", Object.assign({}, base, { thread_fbid: t.fbid, min_uq_seq_id: null,
+          __relay_internal__pv__IGDInitialMessagePageCountrelayprovider: count }));
+        if (j.data && j.data.get_slide_thread_nullable) break;
+      } catch (e) { if (count !== 200) throw e; }
+    }
+    const th = j && j.data && j.data.get_slide_thread_nullable && j.data.get_slide_thread_nullable.as_ig_direct_thread;
+    if (!th) throw new Error(`Sohbet okunamadı. ${GQL_HINT}`);
+    const me = th.viewer || {};
+    const conn = th.slide_messages || {};
+    const items = [];
+    (conn.edges || []).forEach((e) => {
+      const n = e && e.node; if (!n || !n.message_id) return;
+      const mine = (me.interop_messaging_user_fbid && String(n.sender_fbid) === String(me.interop_messaging_user_fbid)) ||
+        (n.sender && me.id && String(n.sender.igid) === String(me.id));
+      if (!mine || n.tombstone_reason) return;
+      items.push({ id: n.message_id, type: n.content_type || "mesaj", text: messageText(n), ts: (parseInt(n.timestamp_ms, 10) || 0) * 1000 });
+    });
+    const pi = conn.page_info || {};
+    items.more = !!(pi.has_previous_page || pi.has_next_page); // Instagram daha eski mesaj olduğunu söylüyor
+    items.loaded = (conn.edges || []).length;
+    onProgress && onProgress(items.length, "");
     return items;
   }
 
+  // Mesajı geri çek — Instagram web'in "Geri çek" işlemiyle aynı (IGDMessageUnsendDialogOffMsysMutation).
   async function unsendItem(threadId, itemId) {
-    const csrf = getCookie("csrftoken");
-    const res = await api(`https://www.instagram.com/api/v1/direct_v2/threads/${threadId}/items/${itemId}/delete/`, {
-      method: "POST",
-      headers: { "x-csrftoken": csrf, "x-instagram-ajax": "1", "content-type": "application/x-www-form-urlencoded" },
-      body: "",
-    });
-    let ok = res.ok;
-    try { const j = await res.json(); ok = ok && (j.status === "ok"); } catch (e) {}
-    if (!ok) throw new Error("HTTP " + res.status);
+    const j = await gql("IGDMessageUnsendDialogOffMsysMutation", { message_id: itemId, send_data: { thread_id: threadId } });
+    if (!(j.data && j.data.direct_unsend_message)) throw new Error("Instagram mesajı geri çekmedi");
     return true;
   }
 
@@ -370,6 +382,7 @@
       const ok = await askConfirm({
         title: `${who}: ${mine.length} mesaj geri çekilecek`,
         html: `<p>Bu sohbette <b>senin gönderdiğin ${mine.length} mesaj</b> geri çekilecek. Mesajlar <b>karşı taraftan da silinir ve geri alınamaz.</b></p>
+          ${mine.more ? `<p class="igd-note">Instagram bu sohbetin yalnızca son ${mine.loaded} mesajını verdi; daha eski mesajların bu turda geri çekilmez. Bitince işlemi tekrar çalıştırarak bir önceki mesajlara ilerleyebilirsin.</p>` : ""}
           <p class="igd-note">Çok sayıda mesajı geri çekmek geçici engele yol açabilir.${wantBackup ? " Başlamadan önce mesajlarının bir yedeği (tarih + metin) Downloads klasörüne kaydedilecek." : " Yedek kapalı — açmak için listedeki “Geri çekmeden önce yedekle” kutusunu işaretle."}</p>`,
         estimate: mine.length * 7,
         danger: true, okLabel: `Geri çek (${mine.length})`, typeWord: "GERİ ÇEK",

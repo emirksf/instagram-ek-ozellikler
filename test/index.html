@@ -44,6 +44,13 @@ window.fetch = (url, opts) => {
       last_activity_timestamp_ms: String(Math.floor(t.last_activity_at / 1000)), users: t.users.map((u) => ({ id: String(u.pk), pk: String(u.pk), username: u.username, profile_pic_url: "" })) }, __typename: "XIGDirectThreadEdge" }, cursor: "c" });
     const conn = (off, n) => ({ edges: THREADS.slice(off, off + n).map(node), page_info: { end_cursor: "c" + (off + n), has_next_page: off + n < THREADS.length } });
     if (name === "PolarisDirectInboxQuery") return json({ data: { get_slide_mailbox_for_iris_subscription: { id: "123456789012345", threads_by_system_folder_and_ig_inbox_folder: conn(0, 15), threads_by_folder: conn(0, 15), pinned_threads_v2: [] } } });
+    if (name === "IGDThreadDetailQuery") {
+      const n = Math.min(v.__relay_internal__pv__IGDInitialMessagePageCountrelayprovider || 20, 200);
+      const edges = Array.from({ length: Math.min(n, 30) }, (_, i) => ({ node: { message_id: "mid.$test" + i, sender_fbid: i % 2 ? "999" : "111", sender: { igid: i % 2 ? "5" : "42" }, timestamp_ms: String(Date.now() - i * 60000), content_type: "TEXT", text_body: null, content: { text_fragments: [{ plaintext: "test mesajı " + i }] } } }));
+      return json({ data: { get_slide_thread_nullable: { as_ig_direct_thread: { viewer: { id: "42", interop_messaging_user_fbid: "111" }, slide_messages: { edges, page_info: { has_previous_page: false, has_next_page: n < 30 } } } } } });
+    }
+    if (name === "IGDMessageUnsendDialogOffMsysMutation") return json({ data: { direct_unsend_message: true } });
+    if (name === "IGDInboxInfoDeleteThreadDialogOffMsysMutation") return json({ data: { ig_direct_hide_thread: { id: v.thread_fbid } } });
     if (/PaginationQuery$/.test(name)) { const off = parseInt(String(v.cursor || "c0").slice(1), 10); return json({ data: { fetch__SlideMailbox: { id: v.id, threads_by_system_folder_and_ig_inbox_folder: conn(off, Math.min(v.count || 5, 20)) } } }); }
     return json({ data: {} });
   }

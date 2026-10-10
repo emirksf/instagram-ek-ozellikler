@@ -19,7 +19,7 @@
   const STORE = "igd_dmcap_data";
   const DOCS = "igd_gql_docs";
   const RX_NAME = /direct|inbox|thread|message|msys|igd|messag|chat/i;
-  const RX_LEARN = /^(PolarisDirectInboxQuery|IGDThreadList\w*PaginationQuery|IGDThreadDetailQuery)$/;
+  const RX_LEARN = /^(PolarisDirectInboxQuery|IGDThreadList\w*PaginationQuery|IGDThreadDetailQuery|IGDMessageUnsend\w*Mutation|IGD\w*DeleteThread\w*Mutation|IGD\w*Message\w*(List|Pagination)\w*Query)$/;
   // Değişkenlerden kişisel/oturuma özgü olanlar saklanmaz
   const VAR_DROP = /^(id|cursor|after|before)$|device|fbid|thread|seq_id|user_?id|viewer/i;
   const MAX_ENTRIES = 40;
