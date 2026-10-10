@@ -67,7 +67,7 @@
     const cap = capActive()
       ? `<span><b>Tanılama açık</b> · ${n} istek yakalandı.</span><button class="igd-btn sm primary" id="igd-cap-save">${ic("download", 12)} Raporu kaydet</button><button class="igd-btn sm ghost" id="igd-cap-stop">Tanılamayı bitir</button>`
       : `<button class="igd-btn sm ghost" id="igd-cap-start">Sorun olursa: tanılama…</button>`;
-    return `<div class="igd-bar2 warn">${ic("alert", 14)}<span>Instagram 10 Ekim 2026'da web'deki eski DM uçlarını kaldırdı. DM listesi yeni yöntemle okunuyor; <b>sohbet silme ve mesaj geri çekmenin web'de karşılığı kalmadı</b>, bunları Instagram uygulamasından yapabilirsin.</span><span class="igd-sp"></span>${cap}</div>`;
+    return `<div class="igd-bar2 warn">${ic("alert", 14)}<span>Instagram 10 Ekim 2026'da web'deki eski DM uçlarını kaldırdı. DM listesi yeni yöntemle okunuyor. <b>Sohbet silme ve mesaj geri çekme bu uygulamada henüz yeni yönteme taşınmadı</b> (Instagram'da ve web'de çalışmaya devam ediyor).</span><span class="igd-sp"></span>${cap}</div>`;
   }
   function wireDmGoneBar() {
     const a = $("igd-cap-start"); if (a) a.onclick = startDmCapture;
@@ -87,7 +87,7 @@
     el.innerHTML = dmGoneBar() + `<div class="igd-selbar">
       <label class="igd-chk"><input type="checkbox" class="igd-cb" id="igd-dm-all" ${all ? "checked" : ""} ${vis.length ? "" : "disabled"}/> Tümünü seç</label>
       <span>${fmtN(S.dmThreads.length)} sohbet yüklü · ${fmtN(vis.length)} görünüyor${n ? ` · <b>${fmtN(n)} seçili</b>` : ""}</span>
-      <span class="igd-sp"></span><span class="igd-note">${dmGone() ? "Silme ve geri çekme web'de yok" : "Silme kalıcıdır"} · Shift+tık: aralık seç</span></div>`;
+      <span class="igd-sp"></span><span class="igd-note">${dmGone() ? "Silme ve geri çekme henüz taşınmadı" : "Silme kalıcıdır"} · Shift+tık: aralık seç</span></div>`;
     wireDmGoneBar();
     $("igd-dm-all").onchange = (e) => {
       if (e.target.checked) vis.forEach((t) => S.dmSel.add(t.id)); else vis.forEach((t) => S.dmSel.delete(t.id));

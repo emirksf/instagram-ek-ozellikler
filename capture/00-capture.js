@@ -116,6 +116,26 @@
     }
     return XS.apply(this, arguments);
   };
+  // WebSocket (yalnızca tanılama modunda): Instagram bazı DM işlemlerini (ör. mesaj geri çekme) gerçek zamanlı
+  // kanaldan gönderebilir. İçerik KAYDEDİLMEZ; yalnızca adres yolu, paket türü ve boyutu.
+  if (diag && window.WebSocket) {
+    const WS = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      try {
+        const u = new URL(this.url);
+        const size = typeof data === "string" ? data.length : (data && (data.byteLength || data.size)) || 0;
+        const key = "WS " + u.host + u.pathname;
+        const list = load(STORE, []);
+        let e = list.find((x) => x.path === key);
+        if (!e) { e = { t: Date.now(), method: "WS", path: key, name: null, frames: 0, sizes: [] }; list.push(e); }
+        e.frames++; if (e.sizes.length < 30) e.sizes.push((typeof data === "string" ? "metin:" : "ikili:") + size);
+        e.lastT = Date.now();
+        save(STORE, list.slice(-MAX_ENTRIES));
+      } catch (err) {}
+      return WS.apply(this, arguments);
+    };
+  }
+
   // fetch
   const F = window.fetch;
   window.fetch = function (input, init) {
