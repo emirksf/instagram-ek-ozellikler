@@ -67,11 +67,13 @@ npm start
 
 Gerçek oturuma dokunmadan ayrı bir veri klasörüyle açmak için `IGD_USER_DATA=/tmp/igd npm start`.
 
-Bu bilgisayar için paket üret (`dist/`):
+Bu bilgisayar için paket üret (`dist/`; Developer ID sertifikası gerekmez, yerel imzalı):
 
 ```bash
-npm run dist -- --publish never
+npm run dist:local
 ```
+
+Bu paket notarize edilmediği için macOS'in DMG'den tek tıkla kurma özelliği "Yüklenemedi" der; uygulamayı Uygulamalar klasörüne sürükleyerek kur.
 
 ### Test (gerçek hesaba dokunmadan)
 
@@ -104,4 +106,4 @@ Mac'te sessiz otomatik güncelleme ve uyarısız kurulum için paket Developer I
 | `APPLE_APP_SPECIFIC_PASSWORD` | [appleid.apple.com](https://appleid.apple.com) → Uygulamaya özel parolalar |
 | `APPLE_TEAM_ID` | [developer.apple.com/account](https://developer.apple.com/account) → Üyelik ayrıntıları → Takım Kimliği |
 
-Bunlar yoksa Mac paketi imzasız çıkar: kurulur ama macOS ilk açılışta uyarır ve uygulama kendini güncelleyemez (yeni sürüm olunca indirme sayfasını açmayı önerir). Windows paketi imzasızdır; kendini güncellemesi buna rağmen çalışır.
+Bunlar yoksa Mac paketi yalnızca yerel (ad-hoc) imzalı çıkar: sürükleyerek kurulur ama macOS ilk açılışta uyarır, DMG'den tek tıkla kurulmaz ve uygulama kendini güncelleyemez (yeni sürüm olunca indirme sayfasını açmayı önerir). Windows paketi imzasızdır; kendini güncellemesi buna rağmen çalışır.

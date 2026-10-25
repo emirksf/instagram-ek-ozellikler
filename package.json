@@ -12,7 +12,8 @@
     "start": "node scripts/bundle.mjs && electron .",
     "test:bundle": "node scripts/bundle.mjs --test",
     "pack": "node scripts/bundle.mjs && electron-builder --dir",
-    "dist": "node scripts/bundle.mjs && electron-builder"
+    "dist": "node scripts/bundle.mjs && electron-builder",
+    "dist:local": "node scripts/bundle.mjs && electron-builder --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false"
   },
   "build": {
     "appId": "com.emirkosif.instadenetim",

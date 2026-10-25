@@ -7,7 +7,8 @@
 #   APPLE_ID                     Apple hesabının e-postası
 #   APPLE_APP_SPECIFIC_PASSWORD  appleid.apple.com'dan alınan uygulamaya özel parola
 #   APPLE_TEAM_ID                Geliştirici takım kimliği (10 karakter)
-# Bunlar yoksa Mac paketi imzasız çıkar (kurulur ama kendini güncelleyemez).
+# Bunlar yoksa Mac paketi yalnızca yerel (ad-hoc) imzalı çıkar: sürükleyerek kurulur ama macOS uyarır,
+# DMG'den tek tıkla kurulmaz ve uygulama kendini güncelleyemez.
 name: Yayınla
 
 on:
@@ -60,9 +61,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # Sertifika yalnızca Mac işine verilir (Windows bunu kendi imzası sanmasın)
+          extra=""
           if [ "$RUNNER_OS" = "macOS" ] && [ -n "$MAC_CERT" ]; then export CSC_LINK="$MAC_CERT"; fi
-          if [ "$RUNNER_OS" = "macOS" ] && [ -z "$MAC_CERT" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
-          npm run dist -- --publish always
+          # Sertifika yoksa yerel (ad-hoc) imza: imzasız Electron paketi Apple Silicon'da açılmaz
+          if [ "$RUNNER_OS" = "macOS" ] && [ -z "$MAC_CERT" ]; then extra="-c.mac.identity=- -c.mac.hardenedRuntime=false"; fi
+          npm run dist -- --publish always $extra
 
   # İki paket de yüklendiyse taslağı yayınla — kurulu uygulamalar güncellemeyi ancak o zaman görür
   publish:
