@@ -1,0 +1,104 @@
+{
+  "name": "instadenetim",
+  "productName": "Instagram EK Özellikler",
+  "version": "1.0.0",
+  "description": "Instagram için ek özellikler: takip, takipçi, DM ve hikaye izleyici denetimi",
+  "author": "Emir Kosif <emir@kosif.com>",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "app/main.js",
+  "scripts": {
+    "bundle": "node scripts/bundle.mjs",
+    "start": "node scripts/bundle.mjs && electron .",
+    "test:bundle": "node scripts/bundle.mjs --test",
+    "pack": "node scripts/bundle.mjs && electron-builder --dir",
+    "dist": "node scripts/bundle.mjs && electron-builder"
+  },
+  "build": {
+    "appId": "com.emirkosif.instadenetim",
+    "productName": "Instagram EK Ozellikler",
+    "copyright": "© Emir Kosif",
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "files": [
+      "app/**",
+      "assets/tray*.png",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "emirksf",
+        "repo": "instagram-ek-ozellikler",
+        "releaseType": "draft"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Instagram-EK-Ozellikler-${version}-mac-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "extendInfo": {
+        "LSHasLocalizedDisplayName": true
+      },
+      "extraResources": [
+        {
+          "from": "assets/mac-lproj/InfoPlist.strings",
+          "to": "tr.lproj/InfoPlist.strings"
+        },
+        {
+          "from": "assets/mac-lproj/InfoPlist.strings",
+          "to": "en.lproj/InfoPlist.strings"
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Instagram EK Özellikler ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Instagram-EK-Ozellikler-${version}-windows-kurulum.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Instagram EK Özellikler",
+      "uninstallDisplayName": "Instagram EK Özellikler"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "allowScripts": {
+    "electron": true,
+    "electron-winstaller": false
+  }
+}

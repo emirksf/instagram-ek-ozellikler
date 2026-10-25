@@ -169,7 +169,7 @@
               <div class="igd-actions"><button class="igd-mini icon" data-sb="${esc(e.u)}" aria-label="@${esc(e.u)} SocialBlade" title="SocialBlade">${ic("trend", 14)}</button></div>
             </div>`;
           }).join("")
-          : emptyCard({ compact: true, icon: "bell", title: "Henüz hareket yok", html: "<p>Bu hesap birini takip ettiğinde ya da bıraktığında burada tarihiyle görünecek (uygulama açık ya da menü çubuğunda olmalı).</p>" });
+          : emptyCard({ compact: true, icon: "bell", title: "Henüz hareket yok", html: `<p>Bu hesap birini takip ettiğinde ya da bıraktığında burada tarihiyle görünecek (uygulama açık ya da ${BG_WHERE} olmalı).</p>` });
       }
       html += `<div class="igd-secbar">@${esc(S.pfUser.username)} şu an takip ediyor (${fmtN(S.pfFollowing.length)})</div>
         <div class="igd-note" style="padding:0 14px 8px;">Sıra Instagram'ın verdiği sıradır, <b>kesin kronolojik değildir</b>. Kesin ve tarihli sonuç için 🔔 İzle'yi kullan.</div>`;
@@ -440,7 +440,7 @@
   // ================================================================ Ayarlar sayfası
   const PRIVACY_HTML = `<ul>
     <li><b>Şifreni görmez.</b> Giriş, Instagram'ın kendi gerçek sayfasında yapılır; bu uygulama yalnızca o sayfayı gösteren bir penceredir. Şifren uygulamaya yazılmaz, hiçbir yerde saklanmaz.</li>
-    <li><b>Her şey bu Mac'te kalır.</b> Uygulamanın sunucusu yoktur; hiçbir bilgin internete ya da başka birine gönderilmez. Analizler kendi oturumunda, cihazında çalışır.</li>
+    <li><b>Her şey bu bilgisayarda kalır.</b> Uygulamanın sunucusu yoktur; hiçbir bilgin internete ya da başka birine gönderilmez. Analizler kendi oturumunda, cihazında çalışır.</li>
     <li><b>Ne okur:</b> takip/takipçi listelerini, (istersen) son gönderilerini beğenenleri ve hikayeni görenleri Instagram'ın kendi arayüzünden çeker. DM bölümünde sohbet <b>listesini</b> ve tarihleri görür; mesaj içeriklerini okumaz — yalnızca sen “yedekle” dersen <b>kendi gönderdiğin</b> mesajların metnini Downloads klasörüne kaydeder.</li>
     <li><b>İşlemler senin komutunla:</b> takibi bırakma, takipçiden çıkarma, DM silme ve mesaj geri çekme yalnızca sen onayladığında ve kendi hesabınla yapılır; günlük sınır ve art arda hata durdurması hesabını korur.</li>
     <li><b>Sorumluluk sende:</b> araç Instagram'ın resmi olmayan uçlarını kullanır. Aşırı ya da hızlı kullanım hesabına geçici kısıtlama getirebilir.</li>
@@ -484,13 +484,13 @@
       </section>
       <section class="igd-panel" aria-labelledby="igd-set-b">
         <h2 id="igd-set-b">${ic("download")} Yedekle ve geri yükle</h2>
-        <p class="igd-note">Ayarların, koru listen, profil izleme listen, işlem geçmişin, hikaye izleyici kayıtların, raporların ve grafik verin tek bir JSON dosyasına kaydedilir (Downloads). Başka bir Mac'e taşımak ya da sıfırdan kurulumdan sonra geri yüklemek için kullanabilirsin.</p>
+        <p class="igd-note">Ayarların, koru listen, profil izleme listen, işlem geçmişin, hikaye izleyici kayıtların, raporların ve grafik verin tek bir JSON dosyasına kaydedilir (Downloads). Başka bir bilgisayara (Mac ya da Windows) taşımak ya da sıfırdan kurulumdan sonra geri yüklemek için kullanabilirsin.</p>
         <div class="row"><label class="igd-chk"><input type="checkbox" id="igd-bk-scans"/> Tarama sonuçlarını da ekle (dosya büyür)</label></div>
         <div class="row"><button class="igd-btn primary" id="igd-bk-save">${ic("download")} Yedeği kaydet</button><button class="igd-btn" id="igd-bk-load">${ic("upload")} Yedekten geri yükle…</button></div>
       </section>
       <section class="igd-panel" aria-labelledby="igd-set-d">
         <h2 id="igd-set-d">${ic("alert")} Veriler</h2>
-        <p class="igd-note">Tarama sonuçları bu Mac'te saklanır, böylece uygulamayı yeniden açınca kaldığın yerden devam edersin. Temizlemek Instagram hesabında hiçbir şeyi değiştirmez.</p>
+        <p class="igd-note">Tarama sonuçları bu bilgisayarda saklanır, böylece uygulamayı yeniden açınca kaldığın yerden devam edersin. Temizlemek Instagram hesabında hiçbir şeyi değiştirmez.</p>
         <div class="row"><button class="igd-btn danger" id="igd-clear">Tarama sonuçlarını temizle…</button></div>
       </section>
       <section class="igd-panel" id="igd-privacy" aria-labelledby="igd-set-p">
@@ -546,7 +546,7 @@
     const info = $("ign-info");
     if (info) info.innerHTML = `Durum: <b>${W && W.isOn() ? "açık" : "kapalı"}</b> · son kontrol: ${last ? esc(fmtDate(last)) : "henüz yok"} · son bilinen takipçi sayısı: ${cnt ? fmtN(cnt) : "—"}<br>
       Arka planda yalnızca <b>takipçi sayına</b> bakılır (tek küçük istek), tüm liste taranmaz. Sayı düşünce net kaç kişi olduğu bildirilir; isimler için Takipçiler sayfasından tara.
-      İzleyicinin çalışması için uygulama açık ya da menü çubuğunda kalmalı.`;
+      İzleyicinin çalışması için uygulama açık ya da ${BG_WHERE} kalmalı.`;
     const li = $("igd-lim-info");
     if (li) { const used = dailyUsed(S.hist).length; li.textContent = `Son 24 saatte ${used} işlem yapıldı.`; }
     const dk = $("igd-th-dark"), lt = $("igd-th-light");
@@ -602,13 +602,13 @@
       const f = inp.files && inp.files[0]; if (!f) return;
       let d;
       try { d = JSON.parse(await f.text()); } catch (e) { toast("Dosya okunamadı (geçerli bir JSON değil).", true); return; }
-      if (!d || d.app !== "instadenetim" || typeof d.ls !== "object") { toast("Bu dosya bir Instagram Takip Denetimi yedeği değil.", true); return; }
+      if (!d || d.app !== "instadenetim" || typeof d.ls !== "object") { toast("Bu dosya bir Instagram EK Özellikler (ya da eski Instagram Takip Denetimi) yedeği değil.", true); return; }
       const idbKeys = Object.keys(isObj(d.idb) ? d.idb : {}).filter((k) => BACKUP_SHAPES[k] && BACKUP_SHAPES[k](d.idb[k]));
       const h = (d.idb || {})[K.history];
       const ok = await askConfirm({
         title: "Yedek geri yüklensin mi?",
         html: `<p><b>${esc(fmtDate(d.t))}</b> tarihli yedek: ${Object.keys(d.ls).length} ayar${Array.isArray(h) ? `, ${fmtN(h.length)} geçmiş kaydı` : ""}${(d.idb || {})[K.cache] ? ", tarama sonuçları" : ""}.</p>
-          <p>Bu Mac'teki aynı ayarlar ve kayıtlar yedektekilerle <b>değiştirilir</b>. Panel ardından yeniden yüklenir.</p>`,
+          <p>Bu bilgisayardaki aynı ayarlar ve kayıtlar yedektekilerle <b>değiştirilir</b>. Panel ardından yeniden yüklenir.</p>`,
         danger: true, okLabel: "Geri yükle",
       });
       if (!ok || guardBusy()) return;
@@ -636,7 +636,7 @@
       body = `<h2 id="igd-onb-t">Hoş geldin 👋</h2>
         <p>Bu uygulama Instagram hesabını analiz eder: seni geri takip etmeyenleri, hayranlarını, şüpheli takipçileri ve uzun süredir yazışmadıklarını bulur; istediklerini topluca yönetirsin.</p>
         <ul>
-          <li>${ic("lock")}<span><b>Şifreni görmez, verin bu Mac'te kalır.</b> Giriş Instagram'ın kendi sayfasında yapılır; hiçbir sunucuya veri gönderilmez.</span></li>
+          <li>${ic("lock")}<span><b>Şifreni görmez, verin bu bilgisayarda kalır.</b> Giriş Instagram'ın kendi sayfasında yapılır; hiçbir sunucuya veri gönderilmez.</span></li>
           <li>${ic("shield")}<span><b>Hiçbir işlem sen onaylamadan yapılmaz.</b> Aralarda hesabını koruyan otomatik beklemeler var.</span></li>
         </ul>
         ${li ? `<div class="igd-okline">${ic("check")} Instagram oturumun açık.</div>` : `<p class="igd-note">Başlamak için Instagram'da giriş yapman gerekiyor. Giriş yapınca bu ekran kendiliğinden geri gelir.</p>`}
@@ -702,7 +702,7 @@
     <nav class="igd-side" aria-label="Bölümler">
       <div class="igd-brandrow">
         <div class="igd-logo igd-grad" aria-hidden="true">${ic("analysis", 18)}</div>
-        <div class="igd-brand"><b>Instagram Takip Denetimi</b><small>Emir Kosif · v4.1</small></div>
+        <div class="igd-brand"><b>Instagram EK Özellikler</b><small>Emir Kosif · v${esc(APP_VER)}</small></div>
       </div>
       ${Object.keys(PAGES).map((k) => (k === "settings" ? `<div class="igd-sp"></div>` : "") +
         `<button class="igd-nav" data-sec="${k}" title="${PAGES[k].label}">${ic(PAGES[k].icon, 18)}<span class="lbl">${PAGES[k].label}</span></button>`).join("")}

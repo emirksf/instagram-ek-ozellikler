@@ -1,9 +1,13 @@
-# Derleme çıktıları (build.sh üretir)
+# Derleme çıktıları
+node_modules/
+dist/
+/app/gen/
+/test/out/
+.DS_Store
+# Eski Swift sürümünün çıktıları
 *.app/
 AppIcon.iconset/
 AppIcon.icns
 /inject.js
 /watcher.js
-.DS_Store
-/test/out/
 /dmcapture.js

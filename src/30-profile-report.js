@@ -87,7 +87,7 @@
       body: `<div class="igd-nform">
           <label class="igd-chk"><input type="checkbox" id="pfo-f" checked/> 🆕 Yeni birini <b>takip ettiğinde</b> bildir</label>
           <label class="igd-chk"><input type="checkbox" id="pfo-u" checked/> ❌ Birini <b>takibi bıraktığında</b> bildir</label>
-          <div class="igd-note">İkisini birden ya da yalnızca birini seçebilirsin. İzleyicinin çalışması için uygulama açık ya da menü çubuğunda olmalı. Hareketler tarihiyle kaydedilir.</div>
+          <div class="igd-note">İkisini birden ya da yalnızca birini seçebilirsin. İzleyicinin çalışması için uygulama açık ya da ${BG_WHERE} olmalı. Hareketler tarihiyle kaydedilir.</div>
         </div>`,
       buttons: [
         { label: "Vazgeç", value: null },

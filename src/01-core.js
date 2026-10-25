@@ -1,6 +1,9 @@
 
   // ================================================================ PANEL: durum ve temel yardımcılar
   const WL_KEY = "igd_whitelist_v2";
+  const APP_VER = window.igdNative && window.igdNative.version ? window.igdNative.version.replace(/^(\d+\.\d+)\.0$/, "$1") : "geliştirme";
+  // İzleyicinin arka planda sürdüğü yer (pencere kapatılınca)
+  const BG_WHERE = window.igdNative && window.igdNative.platform === "win32" ? "sistem tepsisinde" : "menü çubuğunda";
 
   const S = {
     following: [],

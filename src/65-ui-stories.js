@@ -205,7 +205,7 @@
     $("igd-st-status").innerHTML = `
       <div class="igd-bar2">${ic(on ? "bell" : "clock", 14)}<span>${on ? `<b>Takip açık</b> · ${what} · ${stIntervalMin()} dakikada bir` : "<b>Takip kapalı</b>"}
         ${last ? ` · son kontrol ${esc(fmtClock(last))} (${esc(ageStr(last))})` : ""}${on && next ? ` · sonraki ~${esc(hhmm(Math.max(next, Date.now())))}` : ""}</span>
-        <span class="igd-sp"></span><span class="igd-note">Uygulama açık ya da menü çubuğunda olmalı.</span></div>
+        <span class="igd-sp"></span><span class="igd-note">Uygulama açık ya da ${BG_WHERE} olmalı.</span></div>
       ${err ? `<div class="igd-bar2 warn">${ic("alert", 14)}<span>Son kontrolde sorun: ${esc(err)}</span></div>` : ""}
       ${S.st.activeErr && !err ? `<div class="igd-bar2 warn">${ic("alert", 14)}<span>Aktif hikayeler okunamadı: ${esc(S.st.activeErr)}</span></div>` : ""}
       <div class="igd-note" style="padding:0 2px 6px;">Instagram kaç kez bakıldığını göstermez; listeyi en son bakan en üstte verir. Tekrar bakışlar iki kontrol arasındaki sıra değişiminden <b>tahmin edilir</b> — aynı aralıktaki birden çok tekrar tek sayılır, yani sayılar alt sınırdır. Zamanlar bakışın olduğu kontrol aralığıdır.${anyUnreliable ? ` <b>${ST_ORDER_RELIABLE}+ izleyicili hikayelerde Instagram sırayı yakınlığa göre de dizebildiği için tahmin zayıflar.</b>` : ""}</div>`;

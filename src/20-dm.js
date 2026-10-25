@@ -164,7 +164,7 @@
     const ok = await askConfirm({
       title: "DM uyumluluk tanılaması",
       html: `<p>Instagram'ın DM kutunu açarken yaptığı isteklerin <b>yalnızca yapısını</b> kaydeder: sorgu adı, sorgu kimliği, alan adları ve veri türleri. Bu rapor yeni DM okuma yolunu doğru yazmak için gerekiyor.</p>
-        <p><b>Kaydedilmeyenler:</b> kişi adları, mesajlar, kimlik numaraları, oturum anahtarları ve çerezler. Rapor yalnızca bu Mac'te, Downloads klasörüne kaydedilir; hiçbir yere gönderilmez.</p>
+        <p><b>Kaydedilmeyenler:</b> kişi adları, mesajlar, kimlik numaraları, oturum anahtarları ve çerezler. Rapor yalnızca bu bilgisayarda, Downloads klasörüne kaydedilir; hiçbir yere gönderilmez.</p>
         <p class="igd-note">Devam edersen Instagram DM kutun açılır. Görmek istediğin işlemi Instagram'da bir kez yap (ör. bir sohbete gir, bir mesajı geri çek), sonra üstteki “Denetim paneline dön” ile buraya gelip “Raporu kaydet”e bas. Tanılama 30 dakika sonra kendiliğinden kapanır.</p>`,
       okLabel: "Başlat ve DM kutusunu aç",
     });

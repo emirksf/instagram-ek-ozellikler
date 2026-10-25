@@ -1,0 +1,75 @@
+# Sürüm yayını: "v1.0.0" gibi bir etiket gönderilince Mac ve Windows paketlerini derler,
+# GitHub Releases'ta taslağa yükler ve ikisi de hazırsa yayınlar. Kurulu uygulamalar güncellemeyi buradan kendileri bulur.
+#
+# Mac imzası ve notarizasyonu için deponun Settings → Secrets and variables → Actions bölümüne:
+#   MAC_CERT_P12_BASE64          Developer ID Application sertifikası (.p12) — base64
+#   MAC_CERT_PASSWORD            .p12 parolası
+#   APPLE_ID                     Apple hesabının e-postası
+#   APPLE_APP_SPECIFIC_PASSWORD  appleid.apple.com'dan alınan uygulamaya özel parola
+#   APPLE_TEAM_ID                Geliştirici takım kimliği (10 karakter)
+# Bunlar yoksa Mac paketi imzasız çıkar (kurulur ama kendini güncelleyemez).
+name: Yayınla
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # Önce taslak sürüm: iki derleme aynı taslağa yükler, yarım sürüm kullanıcılara görünmez
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Etiket package.json sürümüyle aynı mı?
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          [ "$want" = "$GITHUB_REF_NAME" ] || { echo "Etiket $GITHUB_REF_NAME ama package.json sürümü $want"; exit 1; }
+      - name: Taslak sürüm oluştur
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --generate-notes
+
+  build:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Derle ve yayınla
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAC_CERT: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Sertifika yalnızca Mac işine verilir (Windows bunu kendi imzası sanmasın)
+          if [ "$RUNNER_OS" = "macOS" ] && [ -n "$MAC_CERT" ]; then export CSC_LINK="$MAC_CERT"; fi
+          if [ "$RUNNER_OS" = "macOS" ] && [ -z "$MAC_CERT" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
+          npm run dist -- --publish always
+
+  # İki paket de yüklendiyse taslağı yayınla — kurulu uygulamalar güncellemeyi ancak o zaman görür
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sürümü yayınla
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

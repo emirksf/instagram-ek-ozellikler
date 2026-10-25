@@ -25,7 +25,8 @@
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
   function lsJSON(k, d) { try { const v = JSON.parse(localStorage.getItem(k) || "null"); return v == null ? d : v; } catch (e) { return d; } }
-  function post(msg) { try { window.webkit.messageHandlers.igd.postMessage(msg); return true; } catch (e) { return false; } }
+  // Uygulama kabuğuna mesaj (app/preload.js). Kabuk yoksa (test sayfası, tarayıcı) false döner.
+  function post(msg) { try { window.igdNative.post(msg); return true; } catch (e) { return false; } }
 
   // Takipçi sayfası çekici (panel taraması, izleyicinin derin taraması ve aylık rapor aynı kodu kullanır).
   // Döner: { users, nextMaxId } — sayfa alınamazsa hata fırlatır; 429'da bekleyip yeniden dener.
