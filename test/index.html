@@ -23,6 +23,12 @@ const FOLLOWERS = [...FOLLOWING.slice(0, 50), ...Array.from({ length: NF }, (_, 
 const SERVED_FOLLOWERS = P.get("trunc") === "1" ? FOLLOWERS.slice(0, Math.floor(FOLLOWERS.length * 0.4)) : FOLLOWERS;
 const THREADS = Array.from({ length: 45 }, (_, i) => ({ thread_id: "t" + i, users: [{ pk: 1000 + i, username: "kullanici_" + i, profile_pic_url: "" }], last_activity_at: (Date.now() - i * 9 * 86400000) * 1000 }));
 const POSTS = Array.from({ length: 12 }, (_, i) => ({ pk: String(777000 + i), id: `${777000 + i}_42`, like_count: 40 }));
+// Hikayeler: kimlikler 2^53'ten büyük (sayı olarak okunursa bozulur). Her izleyici isteğinde biri yeni bakar, biri tekrar bakar.
+const NOW_S = Math.floor(Date.now() / 1000);
+const STORIES = [{ id: "3480000000000000001_42", taken: NOW_S - 3 * 3600 }, { id: "3480000000000000003_42", taken: NOW_S - 1800, video: true }];
+const STORY_VIEWS = {}; const STORY_STEP = {};
+STORIES.forEach((s, j) => { const pk = s.id.split("_")[0]; STORY_VIEWS[pk] = FOLLOWERS.slice(j * 3, j * 3 + 8 + j * 4).map((u) => u.pk); STORY_STEP[pk] = 0; });
+window.storyStep = (pk) => { const v = STORY_VIEWS[pk], k = ++STORY_STEP[pk]; v.unshift(FOLLOWERS[60 + k].pk); const i = 2 + (k % (v.length - 2)); v.unshift(v.splice(i, 1)[0]); };
 window.CALLS = [];
 const json = (o, st) => Promise.resolve(new Response(JSON.stringify(o), { status: st || 200, headers: { "content-type": "application/json" } }));
 window.fetch = (url, opts) => {
@@ -33,6 +39,14 @@ window.fetch = (url, opts) => {
   if (/show_many/.test(url)) { const ids = decodeURIComponent(opts.body).replace("user_ids=", "").split(","); const r = {}; ids.forEach((id) => r[id] = { followed_by: +id < 1050 }); return json({ friendship_statuses: r }); }
   if (/users\/42\/info/.test(url)) return json({ user: { follower_count: FOLLOWERS.length, following_count: FOLLOWING.length } });
   if (/users\/\d+\/info/.test(url)) return json({ user: { media_count: 0, follower_count: 3, following_count: 2000 } });
+  if (/feed\/reels_media/.test(url)) return json({ reels: { "42": { items: STORIES.map((s) => ({ pk: Number(s.id.split("_")[0]), id: s.id, taken_at: s.taken, expiring_at: s.taken + 86400, media_type: s.video ? 2 : 1, image_versions2: { candidates: [] }, viewer_count: STORY_VIEWS[s.id.split("_")[0]].length })) } } });
+  { const m = url.match(/media\/(\d+)\/list_reel_media_viewer/); if (m) {
+    const v = STORY_VIEWS[m[1]]; if (!v) return json({ message: "Media not found" }, 404);
+    const off = (url.match(/max_id=(\d+)/) || [0, 0])[1] | 0;
+    if (!off && STORY_STEP[m[1]] >= 0 && window.CALLS.filter((c) => c.includes(m[1])).length > 1) window.storyStep(m[1]);
+    const byPk = (pk) => FOLLOWERS.find((u) => u.pk === pk);
+    return json({ users: v.slice(off, off + 5).map(byPk), next_max_id: off + 5 < v.length ? String(off + 5) : null, user_count: v.length, total_viewer_count: v.length });
+  } }
   if (/feed\/user\/42/.test(url)) return json({ items: POSTS });
   if (/media\/.+\/likers/.test(url)) return json({ users: FOLLOWERS.slice(0, 40).map((u) => ({ pk: u.pk, username: u.username })) });
   if (P.get("dmgone") === "1" && /direct_v2/.test(url)) return Promise.resolve(new Response("<html>Sayfa bulunamadı</html>", { status: 404, headers: { "content-type": "text/html" } }));

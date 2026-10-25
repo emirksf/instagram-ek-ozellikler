@@ -34,6 +34,7 @@
     sparkle: '<path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/>',
     clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+    story: '<circle cx="12" cy="12" r="10" stroke-dasharray="3.2 2.4"/><circle cx="12" cy="12" r="5.5"/>',
     heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/>',
   };
   function ic(name, size) {
@@ -240,6 +241,19 @@
   .igd-chartbox details{margin-top:6px;font-size:12px;color:var(--igd-muted2);}
   .igd-chartbox table{border-collapse:collapse;margin-top:6px;}
   .igd-chartbox td,.igd-chartbox th{padding:3px 12px 3px 0;text-align:left;font-variant-numeric:tabular-nums;}
+
+  /* Hikayeler */
+  .igd-stories{display:flex;gap:10px;overflow-x:auto;padding:2px 20px 4px;}
+  .igd-story{flex:0 0 128px;display:flex;flex-direction:column;gap:4px;background:var(--igd-card);border:1px solid var(--igd-border2);border-radius:12px;padding:7px;cursor:pointer;user-select:none;}
+  .igd-story:hover{border-color:var(--igd-border3);background:var(--igd-ihover);}
+  .igd-story.on{box-shadow:0 0 0 2px var(--igd-accent) inset;}
+  .igd-story.gone .th{filter:grayscale(1);opacity:.55;}
+  .igd-story .th{position:relative;height:140px;border-radius:8px;overflow:hidden;background:var(--igd-ava);display:flex;align-items:center;justify-content:center;color:var(--igd-muted);margin-bottom:2px;}
+  .igd-story .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .igd-story .trk{position:absolute;left:6px;top:6px;display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#fff;padding:2px 7px;border-radius:999px;background:linear-gradient(90deg,#d62976,#962fbf);}
+  .igd-story .l1{font-size:12px;font-weight:700;}
+  .igd-story .l2{font-size:11px;color:var(--igd-muted);}
+  .igd-tag.st-multi{border-color:var(--igd-accent);color:var(--igd-accent);font-weight:700;}
 
   /* Diyaloglar */
   .igd-modal{position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;background:var(--igd-ov);}

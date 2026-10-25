@@ -264,4 +264,3 @@
   migrateStorage();
   if (needsTick()) tick();
   ensureTimer();
-})();

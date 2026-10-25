@@ -8,7 +8,7 @@ Instagram'ı bir WKWebView içinde açan ve üstüne analiz paneli yükleyen mac
 |---|---|
 | `main.swift` | Pencere, menüler, bildirimler (UNUserNotificationCenter), JS ↔ Swift köprüsü |
 | `src/` | Panel (`inject.js` olarak birleştirilir). `00-head` → `01-core` → veri → kuyruk → DM → profil/rapor → arayüz → açılış |
-| `watcher/` | Arka plan izleyici (`watcher.js` olarak birleştirilir): takipçi sayısı, bildirimler, profil izleme, aylık rapor |
+| `watcher/` | Arka plan izleyici (`watcher.js` olarak birleştirilir): takipçi sayısı, bildirimler, profil izleme, aylık rapor, hikaye izleyicileri |
 | `shared/` | İki betiğin ortak kodu: API yardımcıları, IndexedDB deposu, geçmiş/grafik verisi |
 | `test/` | Sahte Instagram API'li test sayfası |
 

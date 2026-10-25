@@ -441,7 +441,7 @@
   const PRIVACY_HTML = `<ul>
     <li><b>Şifreni görmez.</b> Giriş, Instagram'ın kendi gerçek sayfasında yapılır; bu uygulama yalnızca o sayfayı gösteren bir penceredir. Şifren uygulamaya yazılmaz, hiçbir yerde saklanmaz.</li>
     <li><b>Her şey bu Mac'te kalır.</b> Uygulamanın sunucusu yoktur; hiçbir bilgin internete ya da başka birine gönderilmez. Analizler kendi oturumunda, cihazında çalışır.</li>
-    <li><b>Ne okur:</b> takip/takipçi listelerini ve (istersen) son gönderilerini beğenenleri Instagram'ın kendi arayüzünden çeker. DM bölümünde sohbet <b>listesini</b> ve tarihleri görür; mesaj içeriklerini okumaz — yalnızca sen “yedekle” dersen <b>kendi gönderdiğin</b> mesajların metnini Downloads klasörüne kaydeder.</li>
+    <li><b>Ne okur:</b> takip/takipçi listelerini, (istersen) son gönderilerini beğenenleri ve hikayeni görenleri Instagram'ın kendi arayüzünden çeker. DM bölümünde sohbet <b>listesini</b> ve tarihleri görür; mesaj içeriklerini okumaz — yalnızca sen “yedekle” dersen <b>kendi gönderdiğin</b> mesajların metnini Downloads klasörüne kaydeder.</li>
     <li><b>İşlemler senin komutunla:</b> takibi bırakma, takipçiden çıkarma, DM silme ve mesaj geri çekme yalnızca sen onayladığında ve kendi hesabınla yapılır; günlük sınır ve art arda hata durdurması hesabını korur.</li>
     <li><b>Sorumluluk sende:</b> araç Instagram'ın resmi olmayan uçlarını kullanır. Aşırı ya da hızlı kullanım hesabına geçici kısıtlama getirebilir.</li>
   </ul>`;
@@ -484,7 +484,7 @@
       </section>
       <section class="igd-panel" aria-labelledby="igd-set-b">
         <h2 id="igd-set-b">${ic("download")} Yedekle ve geri yükle</h2>
-        <p class="igd-note">Ayarların, koru listen, profil izleme listen, işlem geçmişin, raporların ve grafik verin tek bir JSON dosyasına kaydedilir (Downloads). Başka bir Mac'e taşımak ya da sıfırdan kurulumdan sonra geri yüklemek için kullanabilirsin.</p>
+        <p class="igd-note">Ayarların, koru listen, profil izleme listen, işlem geçmişin, hikaye izleyici kayıtların, raporların ve grafik verin tek bir JSON dosyasına kaydedilir (Downloads). Başka bir Mac'e taşımak ya da sıfırdan kurulumdan sonra geri yüklemek için kullanabilirsin.</p>
         <div class="row"><label class="igd-chk"><input type="checkbox" id="igd-bk-scans"/> Tarama sonuçlarını da ekle (dosya büyür)</label></div>
         <div class="row"><button class="igd-btn primary" id="igd-bk-save">${ic("download")} Yedeği kaydet</button><button class="igd-btn" id="igd-bk-load">${ic("upload")} Yedekten geri yükle…</button></div>
       </section>
@@ -572,7 +572,7 @@
 
   // --- Yedekle / geri yükle ---
   // Kuyruk yedeğe girmez: eski bir yedek, iptal edilmiş bir toplu işlemi geri getirip çalıştırmasın.
-  const BACKUP_IDB_KEYS = [K.history, K.series, K.snapReport, K.reportLast, K.snapFollowers];
+  const BACKUP_IDB_KEYS = [K.history, K.series, K.snapReport, K.reportLast, K.snapFollowers, K.stories];
   const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
   const BACKUP_SHAPES = {
     [K.history]: (v) => Array.isArray(v) && v.every((e) => isObj(e) && typeof e.t === "number" && typeof e.a === "string"),
@@ -580,6 +580,7 @@
     [K.snapReport]: (v) => isObj(v) && isObj(v.map),
     [K.reportLast]: (v) => isObj(v) && Array.isArray(v.gained || []) && Array.isArray(v.lost || []),
     [K.snapFollowers]: (v) => isObj(v) && isObj(v.map),
+    [K.stories]: (v) => isObj(v) && isObj(v.stories) && Array.isArray(v.log),
     [K.cache]: (v) => isObj(v) && Array.isArray(v.following),
     [K.likes]: (v) => isObj(v) && Array.isArray(v.likers),
   };
@@ -691,6 +692,7 @@
     followers: { label: "Takipçiler",    icon: "users",    title: "Takipçiler",    sub: "Seni takip edenler: hayranların, şüpheli hesaplar ve hayaletler", build: buildListPage,     update: updateListPage },
     dm:        { label: "DM'lerim",      icon: "message",  title: "DM'lerim",      sub: "Sohbetlerini yönet: topluca sil, gönderdiğin mesajları geri çek", build: buildDMPage,       update: updateDMPage },
     profile:   { label: "Profil İzleme", icon: "eye",      title: "Profil İzleme", sub: "Başka bir hesabın takip ettikleri ve takip/bırakma bildirimleri", build: buildProfilePage,  update: updateProfilePage },
+    stories:   { label: "Hikayeme bakanlar", icon: "story", title: "Hikayeme bakanlar", sub: "Hikayene kimler, kaç kez bakıyor — aralıklı takip ve tarihli günlük", build: buildStoriesPage, update: updateStoriesPage },
     report:    { label: "Rapor",         icon: "report",   title: "Takipçi raporu", sub: "Takipçi grafiğin; iki tarama arasında gelen ve ayrılan takipçiler", build: buildReportPage, update: updateReportPage },
     history:   { label: "İşlem Geçmişi", icon: "clock",    title: "İşlem Geçmişi", sub: "Yaptığın işlemler tarihiyle — takibi bıraktıklarını geri al",     build: buildHistoryPage,  update: updateHistoryPage },
     settings:  { label: "Ayarlar",       icon: "settings", title: "Ayarlar",       sub: "Güvenlik sınırları, bildirimler, koru listesi, yedek ve gizlilik", build: buildSettingsPage, update: updateSettingsPage },

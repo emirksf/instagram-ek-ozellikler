@@ -48,6 +48,7 @@
     series: "series:followers",      // takipçi sayısı geçmişi [[t,n]]
     queue: "queue",                  // toplu işlem kuyruğu
     likes: "likes",                  // son gönderileri beğenenler (hayalet takipçiler)
+    stories: "stories",              // hikayeme bakanlar: hikaye başına izleyiciler + günlük
   };
 
   // Eski localStorage verisini bir kez IndexedDB'ye taşı ve yer aç (iki betik de çağırabilir).
