@@ -629,7 +629,36 @@
   }
 
   // ================================================================ tek tek işlem
-  async function friendship(kind, pk) {
+  // Instagram web Kasım 2026'dan beri takip etme / bırakmayı GraphQL ile yapıyor; eski REST ucu (friendships/destroy)
+  // hâlâ "ok" diyor ama işlemi yapmıyor. Bu yüzden önce GraphQL denenir, her işlemin sonucu da Instagram'ın
+  // döndürdüğü takip durumundan doğrulanır — durum değişmediyse başarı sayılmaz.
+  const FRIEND_GQL = { destroy: "usePolarisUnfollowMutation", create: "usePolarisFollowMutation" };
+  // İşlem gerçekten oldu mu? (fs: Instagram'ın friendship_status nesnesi)
+  const FRIEND_DONE = {
+    destroy: (fs) => fs.following === false && fs.outgoing_request !== true,
+    create: (fs) => fs.following === true || fs.outgoing_request === true,
+    remove_follower: (fs) => fs.followed_by === false,
+  };
+  const NOT_DONE_MSG = {
+    destroy: "Instagram işlemi uygulamadı — hâlâ takip ediyorsun",
+    create: "Instagram işlemi uygulamadı — takip edilmedi",
+    remove_follower: "Instagram işlemi uygulamadı — hâlâ takipçin",
+  };
+
+  async function friendshipGql(kind, pk) {
+    const j = await gql(FRIEND_GQL[kind], { container_module: "profile", nav_chain: "", target_user_id: String(pk) });
+    const node = j.data && Object.values(j.data).find((v) => v && v.friendship_status);
+    if (!node) {
+      const er = (j.errors || [])[0];
+      const msg = er && (er.message || er.summary || er.description);
+      // Kısıtlama ("bir süre bekle" vb.) kuyruğu durdursun; başka bir sorunda eski yola düşülür
+      if (msg && /feedback|spam|limit|try again|wait|bekle|tekrar dene/i.test(msg)) throw new Error(msg + " · feedback_required");
+      throw gqlErr("Instagram takip yanıtı beklenen biçimde değil.", true);
+    }
+    return node.friendship_status;
+  }
+
+  async function friendshipRest(kind, pk) {
     const csrf = getCookie("csrftoken");
     if (!csrf) throw new Error("csrftoken yok — sayfayı yenileyin.");
     const res = await api(`https://www.instagram.com/api/v1/friendships/${kind}/${pk}/`, {
@@ -639,7 +668,7 @@
         "x-instagram-ajax": "1",
         "content-type": "application/x-www-form-urlencoded",
       },
-      body: "container_module=profile",
+      body: new URLSearchParams({ container_module: "profile", nav_chain: "", user_id: String(pk) }).toString(),
     });
     let j = null;
     try { j = await res.json(); } catch (e) {}
@@ -650,6 +679,33 @@
       const flag = j && (j.feedback_required || j.spam) ? " · feedback_required" : "";
       throw new Error("HTTP " + res.status + (why ? " · " + why : "") + flag);
     }
+    return (j && j.friendship_status) || null;
+  }
+
+  // Güncel takip durumu (doğrulama için tek istek)
+  async function friendshipStatus(pk) {
+    try {
+      const res = await api(`https://www.instagram.com/api/v1/friendships/show/${pk}/`);
+      if (!res.ok) return null;
+      const d = await res.json();
+      return d.friendship_status || d;
+    } catch (e) { return null; }
+  }
+
+  async function friendship(kind, pk) {
+    let fs = null;
+    if (FRIEND_GQL[kind]) {
+      try { fs = await friendshipGql(kind, pk); }
+      catch (e) { if (!e.gqlUnavailable) throw e; } // sorgu kimliği/oturum şablonu yoksa eski yola düş
+    }
+    if (!fs) fs = await friendshipRest(kind, pk);
+    // Yanıtta durum yoksa ya da işlem olmamış görünüyorsa Instagram'a bir kez daha sor
+    if (!fs || !FRIEND_DONE[kind](fs)) {
+      await sleep(1200);
+      const now = await friendshipStatus(pk);
+      if (now && typeof now.following === "boolean") fs = now;
+    }
+    if (fs && !FRIEND_DONE[kind](fs)) throw new Error(NOT_DONE_MSG[kind]);
     return true;
   }
 

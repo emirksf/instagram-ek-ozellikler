@@ -22,6 +22,9 @@
       __relay_internal__pv__IGDInitialMessagePageCountrelayprovider: 20 } },
     IGDMessageUnsendDialogOffMsysMutation: { doc_id: "26948700068153789", vars: {} },
     IGDInboxInfoDeleteThreadDialogOffMsysMutation: { doc_id: "35352443081068612", vars: {} },
+    // Takip et / bırak (Instagram web istemcisinden, 8 Kasım 2026)
+    usePolarisFollowMutation: { doc_id: "26508036048874888", vars: {} },
+    usePolarisUnfollowMutation: { doc_id: "27789106940691111", vars: {} },
     IGDThreadListProfessionalOffMsysPaginationQuery: { doc_id: "28415566141432177", vars: {
       system_folder: "INBOX",
       __relay_internal__pv__IGDPinnedThreadsRenderEnabledGKrelayprovider: true,
@@ -77,12 +80,12 @@
       break;
     }
     if (!res) throw new Error("Instagram'a bağlanılamadı.");
-    if (res.status === 404) throw gqlErr(`Instagram DM sorgusu bulunamadı (HTTP 404). ${GQL_HINT}`, true);
-    if (!res.ok) throw new Error(`Instagram DM sorgusu reddedildi (HTTP ${res.status}).`);
+    if (res.status === 404) throw gqlErr(`Instagram sorgusu bulunamadı (HTTP 404). ${GQL_HINT}`, true);
+    if (!res.ok) throw new Error(`Instagram sorguyu reddetti (HTTP ${res.status}).`);
     const text = (await res.text()).replace(/^for \(;;\);/, "");
     const first = text.split(/\r?\n/).find((l) => l.trim().startsWith("{"));
-    let j; try { j = JSON.parse(first); } catch (e) { throw gqlErr(`Instagram DM yanıtı okunamadı. ${GQL_HINT}`, true); }
-    if (!j.data && j.errors && j.errors.length) throw gqlErr(`Instagram DM sorgusu hata verdi: ${j.errors[0].message || j.errors[0].summary || "bilinmeyen"}. ${GQL_HINT}`, true);
+    let j; try { j = JSON.parse(first); } catch (e) { throw gqlErr(`Instagram yanıtı okunamadı. ${GQL_HINT}`, true); }
+    if (!j.data && j.errors && j.errors.length) throw gqlErr(`Instagram sorgusu hata verdi: ${j.errors[0].message || j.errors[0].summary || "bilinmeyen"}. ${GQL_HINT}`, true);
     return j;
   }
 

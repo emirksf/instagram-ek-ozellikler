@@ -5,5 +5,7 @@
 #   /index.html?trunc=1            — Instagram takipçi listesini erken bitirir
 #   /index.html?fail=1             — Instagram takip işlemlerini reddeder (feedback_required)
 #   /index.html?login=0            — oturum kapalı
+#   /index.html?nogql=1            — Instagram'ın GraphQL takip sorgusu yok (eski REST ucuna düşülür)
+#   /index.html?nogql=1&ghost=1    — eski REST ucu "ok" der ama takibi bırakmaz (Kasım 2026 hatası)
 #   /index.html?speed=0.01         — bekleme süreleri 100 kat kısa (varsayılan)
 cd "$(dirname "$0")/.." && node scripts/bundle.mjs --test && cd test/out && exec python3 -I -m http.server 8766 --bind 127.0.0.1

@@ -30,6 +30,7 @@ const STORY_VIEWS = {}; const STORY_STEP = {};
 STORIES.forEach((s, j) => { const pk = s.id.split("_")[0]; STORY_VIEWS[pk] = FOLLOWERS.slice(j * 3, j * 3 + 8 + j * 4).map((u) => u.pk); STORY_STEP[pk] = 0; });
 window.storyStep = (pk) => { const v = STORY_VIEWS[pk], k = ++STORY_STEP[pk]; v.unshift(FOLLOWERS[60 + k].pk); const i = 2 + (k % (v.length - 2)); v.unshift(v.splice(i, 1)[0]); };
 window.CALLS = [];
+const GHOST_FOLLOWING = new Set(FOLLOWING.map((u) => u.pk)); // sahte hesabın takip ettikleri (doğrulama için)
 const json = (o, st) => Promise.resolve(new Response(JSON.stringify(o), { status: st || 200, headers: { "content-type": "application/json" } }));
 window.fetch = (url, opts) => {
   url = String(url); window.CALLS.push((opts && opts.method || "GET") + " " + url.replace("https://www.instagram.com/api/v1", ""));
@@ -63,13 +64,27 @@ window.fetch = (url, opts) => {
       const edges = Array.from({ length: Math.min(n, 30) }, (_, i) => ({ node: { message_id: "mid.$test" + i, sender_fbid: i % 2 ? "999" : "111", sender: { igid: i % 2 ? "5" : "42" }, timestamp_ms: String(Date.now() - i * 60000), content_type: "TEXT", text_body: null, content: { text_fragments: [{ plaintext: "test mesajı " + i }] } } }));
       return json({ data: { get_slide_thread_nullable: { as_ig_direct_thread: { viewer: { id: "42", interop_messaging_user_fbid: "111" }, slide_messages: { edges, page_info: { has_previous_page: false, has_next_page: n < 30 } } } } } });
     }
+    if (name === "usePolarisUnfollowMutation" || name === "usePolarisFollowMutation") {
+      if (P.get("fail")) return json({ errors: [{ message: "Please wait a few minutes before you try again." }], data: { xdt_destroy_friendship: null } });
+      if (P.get("nogql")) return json({ errors: [{ message: "Unknown doc_id" }] });
+      const un = name === "usePolarisUnfollowMutation", id = String(v.target_user_id);
+      if (un) GHOST_FOLLOWING.delete(id); else GHOST_FOLLOWING.add(id);
+      return json({ data: { [un ? "xdt_destroy_friendship" : "xdt_create_friendship"]: { username: "u" + id, friendship_status: { following: !un, outgoing_request: false, followed_by: false, is_bestie: false }, id } } });
+    }
     if (name === "IGDMessageUnsendDialogOffMsysMutation") return json({ data: { direct_unsend_message: true } });
     if (name === "IGDInboxInfoDeleteThreadDialogOffMsysMutation") return json({ data: { ig_direct_hide_thread: { id: v.thread_fbid } } });
     if (/PaginationQuery$/.test(name)) { const off = parseInt(String(v.cursor || "c0").slice(1), 10); return json({ data: { fetch__SlideMailbox: { id: v.id, threads_by_system_folder_and_ig_inbox_folder: conn(off, Math.min(v.count || 5, 20)) } } }); }
     return json({ data: {} });
   }
   if (/direct_v2\/inbox/.test(url)) { const m = url.match(/cursor=(\d+)/); const off = m ? +m[1] : 0; return json({ inbox: { threads: THREADS.slice(off, off + 20), oldest_cursor: String(off + 20), has_older: off + 20 < THREADS.length } }); }
-  if (/friendships\/(destroy|create|remove_follower)/.test(url)) return P.get("fail") ? json({ status: "fail", feedback_required: true, feedback_title: "Try Again Later" }, 400) : json({ status: "ok" });
+  // ?nogql=1: GraphQL takip sorgusu yok → eski REST ucu; ?ghost=1 ile bu uç "ok" der ama takibi bırakmaz (Kasım 2026)
+  if (/friendships\/(destroy|create|remove_follower)/.test(url)) {
+    if (P.get("fail")) return json({ status: "fail", feedback_required: true, feedback_title: "Try Again Later" }, 400);
+    const m = url.match(/friendships\/(destroy|create)\/(\d+)/);
+    if (m && !P.get("ghost")) { if (m[1] === "destroy") GHOST_FOLLOWING.delete(m[2]); else GHOST_FOLLOWING.add(m[2]); }
+    return json({ status: "ok" });
+  }
+  { const m = url.match(/friendships\/show\/(\d+)/); if (m) return json({ following: GHOST_FOLLOWING.has(m[1]), followed_by: +m[1] < 1050, outgoing_request: false }); }
   if (/hide/.test(url)) return json({ status: "ok" });
   return json({}, 404);
 };
